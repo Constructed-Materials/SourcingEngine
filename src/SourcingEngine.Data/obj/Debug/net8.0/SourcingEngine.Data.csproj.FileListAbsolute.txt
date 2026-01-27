@@ -1,0 +1,15 @@
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/bin/Debug/net8.0/SourcingEngine.Data.deps.json
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/bin/Debug/net8.0/SourcingEngine.Data.dll
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/bin/Debug/net8.0/SourcingEngine.Data.pdb
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/bin/Debug/net8.0/SourcingEngine.Core.dll
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/bin/Debug/net8.0/SourcingEngine.Core.pdb
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/SourcingEngine.Data.csproj.AssemblyReference.cache
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/SourcingEngine.Data.GeneratedMSBuildEditorConfig.editorconfig
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/SourcingEngine.Data.AssemblyInfoInputs.cache
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/SourcingEngine.Data.AssemblyInfo.cs
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/SourcingEngine.Data.csproj.CoreCompileInputs.cache
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/Sourcing.16374D79.Up2Date
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/SourcingEngine.Data.dll
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/refint/SourcingEngine.Data.dll
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/SourcingEngine.Data.pdb
+/Users/roym/Downloads/MVP_PARTNER_PACKAGE/SourcingEngine/src/SourcingEngine.Data/obj/Debug/net8.0/ref/SourcingEngine.Data.dll
