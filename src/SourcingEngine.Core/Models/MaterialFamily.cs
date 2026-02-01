@@ -24,4 +24,9 @@ public record MaterialFamily
     /// Typical lead time in days
     /// </summary>
     public int? TypicalLeadTimeDays { get; init; }
+
+    /// <summary>
+    /// Comma-separated list of synonyms for full-text search
+    /// </summary>
+    public string? Synonyms { get; init; }
 }

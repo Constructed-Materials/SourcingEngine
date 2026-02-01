@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using SourcingEngine.Core.Configuration;
 using SourcingEngine.Core.Repositories;
 using SourcingEngine.Core.Services;
 using SourcingEngine.Data;
@@ -29,6 +30,7 @@ public class DatabaseFixture : IAsyncLifetime
 
         // Configuration
         services.Configure<DatabaseSettings>(configuration.GetSection("Database"));
+        services.Configure<SemanticSearchSettings>(configuration.GetSection("SemanticSearch"));
 
         // Logging
         services.AddLogging(builder =>
@@ -45,9 +47,12 @@ public class DatabaseFixture : IAsyncLifetime
         services.AddScoped<IProductEnrichedRepository, ProductEnrichedRepository>();
 
         // Core services
+        services.AddMemoryCache();
         services.AddSingleton<ISizeCalculator, SizeCalculator>();
         services.AddSingleton<ISynonymExpander, SynonymExpander>();
         services.AddSingleton<IInputNormalizer, InputNormalizer>();
+        services.AddSingleton<IEmbeddingService, LocalEmbeddingService>();
+        services.AddSingleton<ISearchFusionService, RrfFusionService>();
         services.AddScoped<ISearchOrchestrator, SearchOrchestrator>();
 
         ServiceProvider = services.BuildServiceProvider();
