@@ -10,7 +10,7 @@ public interface IEmbeddingService
     /// </summary>
     /// <param name="text">The text to embed</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Float array representing the embedding vector (384 dimensions for local model)</returns>
+    /// <returns>Float array representing the embedding vector. Dimension depends on provider: 384 (local bge-micro-v2) or 768 (Ollama nomic-embed-text)</returns>
     Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -1,3 +1,5 @@
+using SourcingEngine.Core.Services;
+
 namespace SourcingEngine.Core.Configuration;
 
 /// <summary>
@@ -9,6 +11,12 @@ public class SemanticSearchSettings
     /// Whether semantic search is enabled. If false, falls back to keyword search.
     /// </summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Default semantic search mode when not explicitly specified.
+    /// Options: Off, FamilyFirst, ProductFirst, Hybrid
+    /// </summary>
+    public SemanticSearchMode DefaultMode { get; set; } = SemanticSearchMode.FamilyFirst;
 
     /// <summary>
     /// Weight for full-text search results in RRF fusion (0.0 to 2.0)
@@ -29,4 +37,9 @@ public class SemanticSearchSettings
     /// Maximum number of results to return from hybrid search
     /// </summary>
     public int MatchCount { get; set; } = 10;
+
+    /// <summary>
+    /// Minimum similarity threshold for semantic matches (0.0-1.0)
+    /// </summary>
+    public float SimilarityThreshold { get; set; } = 0.5f;
 }

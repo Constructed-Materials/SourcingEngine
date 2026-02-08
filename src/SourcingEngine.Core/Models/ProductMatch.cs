@@ -66,4 +66,12 @@ public record ProductMatch
     /// </summary>
     [JsonPropertyName("sourceSchema")]
     public string? SourceSchema { get; init; }
+
+    /// <summary>
+    /// Semantic similarity score (0.0-1.0) from embedding search.
+    /// Only populated when using ProductFirst or Hybrid search mode.
+    /// </summary>
+    [JsonPropertyName("semanticScore")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public float? SemanticScore { get; init; }
 }

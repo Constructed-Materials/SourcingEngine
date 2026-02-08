@@ -68,6 +68,8 @@ public class SizeCalculatorTests
     [InlineData("8 inch masonry block", 8, "inch")]
     [InlineData("20cm concrete", 20, "cm")]
     [InlineData("200mm steel", 200, "mm")]
+    [InlineData("12ft joist", 12, "ft")]
+    [InlineData("4m beam", 4, "m")]
     public void ExtractSize_ValidInput_ReturnsCorrectValues(string input, double expectedValue, string expectedUnit)
     {
         var result = _calculator.ExtractSize(input);
@@ -75,5 +77,43 @@ public class SizeCalculatorTests
         Assert.NotNull(result);
         Assert.Equal(expectedValue, result.Value.Value);
         Assert.Equal(expectedUnit, result.Value.Unit);
+    }
+
+    [Theory]
+    [InlineData("12 ft", "3.7")]   // 12 * 0.3048 = 3.66 → rounded to 3.7m
+    [InlineData("10 feet", "3")]   // 10 * 0.3048 = 3.048 → rounded to 3m
+    public void GetSizeVariants_FeetInput_ContainsMeters(string input, string expectedM)
+    {
+        var variants = _calculator.GetSizeVariants(input);
+
+        Assert.Contains(variants, v => v.Contains(expectedM) && v.Contains("m", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("4 m", "13")]   // 4 / 0.3048 = 13.12 → rounded to 13 ft
+    [InlineData("3 meter", "10")] // 3 / 0.3048 = 9.84 → rounded to 10 ft
+    public void GetSizeVariants_MetersInput_ContainsFeet(string input, string expectedFt)
+    {
+        var variants = _calculator.GetSizeVariants(input);
+
+        Assert.Contains(variants, v => v.Contains(expectedFt) && v.Contains("ft", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("100 sqft", "9")]  // 100 * 0.092903 = 9.29 → rounded to 9.3 sqm
+    public void GetSizeVariants_SqFtInput_ContainsSqM(string input, string expectedSqM)
+    {
+        var variants = _calculator.GetSizeVariants(input);
+
+        Assert.Contains(variants, v => v.Contains(expectedSqM) && (v.Contains("sqm") || v.Contains("sq m") || v.Contains("m²")));
+    }
+
+    [Theory]
+    [InlineData("10 sqm", "108")] // 10 / 0.092903 = 107.6 → rounded to 108 sqft
+    public void GetSizeVariants_SqMInput_ContainsSqFt(string input, string expectedSqFt)
+    {
+        var variants = _calculator.GetSizeVariants(input);
+
+        Assert.Contains(variants, v => v.Contains(expectedSqFt) && (v.Contains("sqft") || v.Contains("sq ft") || v.Contains("sf")));
     }
 }

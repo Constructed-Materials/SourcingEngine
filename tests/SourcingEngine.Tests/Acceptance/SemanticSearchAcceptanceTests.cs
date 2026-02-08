@@ -67,9 +67,10 @@ public class SemanticSearchAcceptanceTests
 
         // Assert
         _output.WriteLine($"Embedding dimension: {embedding.Length}");
+        _output.WriteLine($"Embedding provider: {embeddingService.GetType().Name}");
         _output.WriteLine($"Sample values: [{embedding[0]:F4}, {embedding[1]:F4}, {embedding[2]:F4}, ...]");
 
-        Assert.Equal(384, embedding.Length);
+        Assert.Equal(embeddingService.EmbeddingDimension, embedding.Length);
         Assert.All(embedding, v => Assert.False(float.IsNaN(v)));
         Assert.All(embedding, v => Assert.False(float.IsInfinity(v)));
     }
@@ -124,11 +125,10 @@ public class SemanticSearchAcceptanceTests
             _output.WriteLine($"  Rank {r.Rank}: {r.Family.FamilyLabel} (score: {r.Score:F4})");
         }
 
-        // Should return ranked results
-        if (results.Count > 0)
-        {
-            Assert.True(results[0].Rank == 1);
-        }
+        // Should return ranked results for common construction terms
+        Assert.True(results.Count >= 1,
+            "Expected ≥1 full-text search result for 'masonry block concrete'");
+        Assert.True(results[0].Rank == 1);
     }
 
     /// <summary>
@@ -155,8 +155,11 @@ public class SemanticSearchAcceptanceTests
             _output.WriteLine($"  Rank {r.Rank}: {r.Family.FamilyLabel} (similarity: {r.Score:F4})");
         }
 
-        // Note: This test may return 0 results until embeddings are seeded
+        // Semantic search requires seeded embeddings with matching dimensions
         // Run: dotnet run --project src/SourcingEngine.Console -- --seed-embeddings
+        Assert.True(results.Count >= 1,
+            $"Expected ≥1 semantic search result for '{queryText}'. " +
+            "Ensure family embeddings are seeded (--seed-embeddings) with the same embedding model.");
     }
 
     /// <summary>
@@ -209,5 +212,183 @@ public class SemanticSearchAcceptanceTests
         }
 
         return dotProduct / (MathF.Sqrt(normA) * MathF.Sqrt(normB));
+    }
+}
+
+/// <summary>
+/// Acceptance tests for product-level semantic search (nomic-embed-text / 768d)
+/// Requires: Ollama running with nomic-embed-text model and product embeddings generated
+/// </summary>
+[Collection("Database")]
+[Trait("Category", "Integration")]
+[Trait("Category", "SemanticProducts")]
+public class SemanticProductSearchTests
+{
+    private readonly DatabaseFixture _fixture;
+    private readonly ITestOutputHelper _output;
+
+    public SemanticProductSearchTests(DatabaseFixture fixture, ITestOutputHelper output)
+    {
+        _fixture = fixture;
+        _output = output;
+    }
+
+    /// <summary>
+    /// Test ProductFirst search mode bypasses family resolution and uses LLM query parsing
+    /// </summary>
+    [Fact]
+    public async Task Search_ProductFirstMode_ReturnsSemanticMatches()
+    {
+        SkipIfNoOllama();
+
+        // Arrange
+        using var scope = _fixture.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
+
+        var bomText = "aluminum window frame for commercial building";
+
+        // Act
+        var result = await orchestrator.SearchAsync(bomText, SemanticSearchMode.ProductFirst);
+
+        // Assert
+        _output.WriteLine($"Query: {result.Query}");
+        _output.WriteLine($"Family: {result.FamilyLabel}");
+        _output.WriteLine($"CSI: {result.CsiCode}");
+        _output.WriteLine($"Execution Time: {result.ExecutionTimeMs}ms");
+        _output.WriteLine($"Matches: {result.MatchCount}");
+
+        foreach (var match in result.Matches.Take(5))
+        {
+            _output.WriteLine($"  {match.Vendor} - {match.ModelName} [CSI:{match.CsiCode}] (score: {match.SemanticScore:F4})");
+            _output.WriteLine($"    UseWhen: {match.UseWhen ?? "(none)"}");
+            _output.WriteLine($"    Schema: {match.SourceSchema ?? "(none)"}");
+        }
+
+        Assert.True(result.MatchCount >= 1,
+            $"Expected ≥1 semantic match for '{bomText}'. " +
+            "Ensure product embeddings are generated (--generate-embeddings --all).");
+        Assert.All(result.Matches, m =>
+        {
+            Assert.NotNull(m.Vendor);
+            Assert.NotNull(m.ModelName);
+            Assert.True(m.SemanticScore > 0, "Semantic score should be > 0");
+        });
+
+        // ProductFirst should now resolve family and CSI from semantic results
+        Assert.NotNull(result.FamilyLabel);
+    }
+
+    /// <summary>
+    /// Test Hybrid mode combines family and product results
+    /// </summary>
+    [Fact]
+    public async Task Search_HybridMode_CombinesFamilyAndProductResults()
+    {
+        SkipIfNoOllama();
+
+        // Arrange
+        using var scope = _fixture.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
+
+        var bomText = "8 inch masonry block lightweight";
+
+        // Act — use Hybrid mode to combine family keyword + product semantic results
+        var result = await orchestrator.SearchAsync(bomText, SemanticSearchMode.Hybrid);
+
+        // Assert
+        _output.WriteLine($"Query: {result.Query}");
+        _output.WriteLine($"Family: {result.FamilyLabel}");
+        _output.WriteLine($"Execution Time: {result.ExecutionTimeMs}ms");
+        _output.WriteLine($"Matches: {result.MatchCount}");
+
+        foreach (var match in result.Matches.Take(5))
+        {
+            var scoreInfo = match.SemanticScore.HasValue ? $" (semantic: {match.SemanticScore:F4})" : "";
+            _output.WriteLine($"  {match.Vendor} - {match.ModelName}{scoreInfo}");
+        }
+
+        Assert.True(result.MatchCount >= 1,
+            $"Expected ≥1 match from hybrid search for '{bomText}'. " +
+            "Ensure product embeddings are generated (--generate-embeddings --all).");
+        // Hybrid should resolve a family for well-known materials
+        Assert.NotNull(result.FamilyLabel);
+
+        // At least some matches should have enriched vendor data
+        var enrichedCount = result.Matches.Count(m =>
+            m.UseWhen != null || m.KeyFeatures != null || m.TechnicalSpecs != null || m.SourceSchema != null);
+        _output.WriteLine($"Enriched matches: {enrichedCount}/{result.MatchCount}");
+    }
+
+    /// <summary>
+    /// Test FamilyFirst mode works as before (regression test — no Ollama required)
+    /// </summary>
+    [Fact]
+    public async Task Search_FamilyFirstMode_WorksAsExpected()
+    {
+        // Arrange
+        using var scope = _fixture.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
+
+        var bomText = "concrete masonry unit";
+
+        // Act
+        var result = await orchestrator.SearchAsync(bomText, SemanticSearchMode.FamilyFirst);
+
+        // Assert
+        _output.WriteLine($"Query: {result.Query}");
+        _output.WriteLine($"Family: {result.FamilyLabel}");
+        _output.WriteLine($"Matches: {result.MatchCount}");
+
+        // Should find material family
+        Assert.NotNull(result.FamilyLabel);
+        Assert.True(result.MatchCount >= 1,
+            $"Expected ≥1 match for '{bomText}' in FamilyFirst mode.");
+    }
+
+    /// <summary>
+    /// Test semantic search finds products by technical specifications
+    /// </summary>
+    [Fact]
+    public async Task Search_TechnicalSpecQuery_FindsMatchingProducts()
+    {
+        SkipIfNoOllama();
+
+        // Arrange
+        using var scope = _fixture.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
+
+        // Query with dimensions that should match product specs
+        var bomText = "36x48 inch window aluminum frame";
+
+        // Act
+        var result = await orchestrator.SearchAsync(bomText, SemanticSearchMode.ProductFirst);
+
+        // Assert
+        _output.WriteLine($"Query: {result.Query}");
+        _output.WriteLine($"Matches: {result.MatchCount}");
+
+        foreach (var match in result.Matches.Take(5))
+        {
+            _output.WriteLine($"  {match.Vendor} - {match.ModelName} (score: {match.SemanticScore:F4})");
+        }
+
+        Assert.True(result.MatchCount >= 1,
+            $"Expected ≥1 semantic match for '{bomText}'. " +
+            "Ensure product embeddings are generated (--generate-embeddings --all).");
+        Assert.All(result.Matches, m =>
+            Assert.True(m.SemanticScore > 0, "Semantic score should be > 0"));
+    }
+
+    /// <summary>
+    /// Guard: skip test cleanly when Ollama is not running
+    /// </summary>
+    private void SkipIfNoOllama()
+    {
+        if (!_fixture.IsOllamaAvailable)
+        {
+            _output.WriteLine("SKIPPED: Ollama is not available. Start Ollama and generate embeddings to run this test.");
+            Assert.Fail("Ollama not available — test requires Ollama with nomic-embed-text for 768d embeddings. " +
+                "Start Ollama, then run: dotnet run --project src/SourcingEngine.Console -- --generate-embeddings --all");
+        }
     }
 }

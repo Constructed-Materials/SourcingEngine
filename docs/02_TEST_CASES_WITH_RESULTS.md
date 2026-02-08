@@ -113,6 +113,7 @@ WHERE v.name IN ('Sto Corp', 'DuROCK Alfacing International')
 
 ---
 
+# Ignore for now: 
 ## 🔍 TEST CASE 4: Aluminum Railing
 
 **BOM Item:** `Ext Railing` (Category: Metals, $8,142)

@@ -18,6 +18,8 @@ public class SearchOrchestrator : ISearchOrchestrator
     private readonly IMaterialFamilyRepository _materialFamilyRepository;
     private readonly IProductRepository _productRepository;
     private readonly IProductEnrichedRepository _productEnrichedRepository;
+    private readonly ISemanticProductRepository? _semanticProductRepository;
+    private readonly IQueryParserService? _queryParserService;
     private readonly IEmbeddingService _embeddingService;
     private readonly ISearchFusionService _fusionService;
     private readonly SemanticSearchSettings _semanticSettings;
@@ -31,24 +33,34 @@ public class SearchOrchestrator : ISearchOrchestrator
         IEmbeddingService embeddingService,
         ISearchFusionService fusionService,
         IOptions<SemanticSearchSettings> semanticSettings,
-        ILogger<SearchOrchestrator> logger)
+        ILogger<SearchOrchestrator> logger,
+        ISemanticProductRepository? semanticProductRepository = null,
+        IQueryParserService? queryParserService = null)
     {
         _inputNormalizer = inputNormalizer;
         _materialFamilyRepository = materialFamilyRepository;
         _productRepository = productRepository;
         _productEnrichedRepository = productEnrichedRepository;
+        _semanticProductRepository = semanticProductRepository;
+        _queryParserService = queryParserService;
         _embeddingService = embeddingService;
         _fusionService = fusionService;
         _semanticSettings = semanticSettings.Value;
         _logger = logger;
     }
 
-    public async Task<SearchResult> SearchAsync(string bomText, CancellationToken cancellationToken = default)
+    public Task<SearchResult> SearchAsync(string bomText, CancellationToken cancellationToken = default)
+    {
+        var mode = _semanticSettings.Enabled ? _semanticSettings.DefaultMode : SemanticSearchMode.Off;
+        return SearchAsync(bomText, mode, cancellationToken);
+    }
+
+    public async Task<SearchResult> SearchAsync(string bomText, SemanticSearchMode mode, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
         var warnings = new List<string>();
 
-        _logger.LogInformation("Starting search for: {BomText}", bomText);
+        _logger.LogInformation("Starting search for: {BomText} (mode: {Mode})", bomText, mode);
 
         // Step 1: Normalize input
         _logger.LogDebug("Step 1: Normalizing input...");
@@ -56,53 +68,59 @@ public class SearchOrchestrator : ISearchOrchestrator
         _logger.LogInformation("Extracted {KeywordCount} keywords, {SizeCount} size variants, {SynonymCount} synonyms",
             bomItem.Keywords.Count, bomItem.SizeVariants.Count, bomItem.Synonyms.Count);
 
-        // Step 2: Find material family using hybrid search
-        _logger.LogDebug("Step 2: Finding material family...");
-        var families = await FindMaterialFamiliesAsync(bomText, bomItem.Synonyms, cancellationToken);
-        var primaryFamily = families.FirstOrDefault();
-        
-        if (primaryFamily == null)
+        List<ProductMatch> matches;
+        MaterialFamily? primaryFamily = null;
+        string? csiCode = null;
+
+        // Route based on semantic search mode
+        if (mode == SemanticSearchMode.ProductFirst && _semanticProductRepository != null)
         {
-            warnings.Add("No material family found for the given keywords");
-            _logger.LogWarning("No material family found for: {Keywords}", string.Join(", ", bomItem.Synonyms));
+            // ProductFirst: Direct semantic search on products with enrichment
+            var (productMatches, productWarnings, productFamily, productCsi) = await SearchProductsSemanticAsync(bomText, cancellationToken);
+            matches = productMatches;
+            warnings.AddRange(productWarnings);
+            // Derive family/CSI from semantic results
+            if (productFamily != null)
+            {
+                primaryFamily = (await _materialFamilyRepository.FindByKeywordsAsync(
+                    new[] { productFamily }, cancellationToken)).FirstOrDefault();
+            }
+            csiCode = productCsi;
+        }
+        else if (mode == SemanticSearchMode.Hybrid && _semanticProductRepository != null)
+        {
+            // Hybrid: Run both FamilyFirst and ProductFirst and fuse results
+            var familyFirstTask = SearchFamilyFirstAsync(bomText, bomItem, cancellationToken);
+            var productFirstTask = SearchProductsSemanticAsync(bomText, cancellationToken);
+
+            await Task.WhenAll(familyFirstTask, productFirstTask);
+
+            var (familyMatches, familyWarnings, family, code) = await familyFirstTask;
+            var (productMatches, productWarnings, _, _) = await productFirstTask;
+
+            primaryFamily = family;
+            csiCode = code;
+
+            // Fuse results using similarity scores
+            matches = FuseProductMatches(familyMatches, productMatches, _semanticSettings.MatchCount);
+            warnings.AddRange(familyWarnings);
+            warnings.AddRange(productWarnings);
+
+            _logger.LogInformation("Hybrid search: {FamilyCount} family matches, {ProductCount} semantic matches, {FusedCount} fused",
+                familyMatches.Count, productMatches.Count, matches.Count);
         }
         else
         {
-            _logger.LogInformation("Found material family: {FamilyLabel} ({FamilyName})", 
-                primaryFamily.FamilyLabel, primaryFamily.FamilyName);
+            // FamilyFirst or Off: Original family-based search
+            var (familyMatches, familyWarnings, family, code) = await SearchFamilyFirstAsync(bomText, bomItem, cancellationToken);
+            matches = familyMatches;
+            warnings.AddRange(familyWarnings);
+            primaryFamily = family;
+            csiCode = code;
         }
 
-        // Step 3: Get CSI code from family
-        var csiCode = primaryFamily?.CsiDivision != null 
-            ? $"{primaryFamily.CsiDivision}2200" // Default pattern for CSI codes
-            : null;
-        _logger.LogDebug("Step 3: Using CSI code: {CsiCode}", csiCode ?? "none");
-
-        // Step 4: Search products
-        _logger.LogDebug("Step 4: Searching products...");
-        var products = await _productRepository.FindProductsAsync(
-            primaryFamily?.FamilyLabel,
-            null, // Don't filter by exact CSI to get more results
-            bomItem.SizeVariants.Count > 0 ? bomItem.SizeVariants : null,
-            bomItem.Synonyms,
-            cancellationToken);
-
-        _logger.LogInformation("Found {ProductCount} products matching criteria", products.Count);
-
-        // Step 5: Get enriched data in parallel
-        _logger.LogDebug("Step 5: Fetching enriched product data...");
-        var productIds = products.Select(p => p.ProductId).ToList();
-        var enrichedData = await _productEnrichedRepository.GetEnrichedDataAsync(productIds, cancellationToken);
-        
-        // Create lookup for enriched data
-        var enrichedLookup = enrichedData.ToDictionary(e => e.ProductId, e => e);
-
-        // Step 6: Combine into matches
-        _logger.LogDebug("Step 6: Combining results...");
-        var matches = products.Select(p => CreateProductMatch(p, enrichedLookup)).ToList();
-
         stopwatch.Stop();
-        _logger.LogInformation("Search completed in {ElapsedMs}ms with {MatchCount} matches", 
+        _logger.LogInformation("Search completed in {ElapsedMs}ms with {MatchCount} matches",
             stopwatch.ElapsedMilliseconds, matches.Count);
 
         return new SearchResult
@@ -111,11 +129,206 @@ public class SearchOrchestrator : ISearchOrchestrator
             SizeVariants = bomItem.SizeVariants,
             Keywords = bomItem.Synonyms,
             FamilyLabel = primaryFamily?.FamilyLabel,
-            CsiCode = products.FirstOrDefault()?.CsiSectionCode ?? csiCode,
+            CsiCode = csiCode,
             Matches = matches,
             ExecutionTimeMs = stopwatch.ElapsedMilliseconds,
             Warnings = warnings
         };
+    }
+
+    /// <summary>
+    /// Original family-first search approach
+    /// </summary>
+    private async Task<(List<ProductMatch> Matches, List<string> Warnings, MaterialFamily? Family, string? CsiCode)> 
+        SearchFamilyFirstAsync(string bomText, BomItem bomItem, CancellationToken cancellationToken)
+    {
+        var warnings = new List<string>();
+
+        // Find material family using hybrid search
+        var families = await FindMaterialFamiliesAsync(bomText, bomItem.Synonyms, cancellationToken);
+        var primaryFamily = families.FirstOrDefault();
+
+        if (primaryFamily == null)
+        {
+            warnings.Add("No material family found for the given keywords");
+            _logger.LogWarning("No material family found for: {Keywords}", string.Join(", ", bomItem.Synonyms));
+        }
+        else
+        {
+            _logger.LogInformation("Found material family: {FamilyLabel} ({FamilyName})",
+                primaryFamily.FamilyLabel, primaryFamily.FamilyName);
+        }
+
+        var csiCode = primaryFamily?.CsiDivision != null
+            ? $"{primaryFamily.CsiDivision}2200"
+            : null;
+
+        // Search products by family
+        var products = await _productRepository.FindProductsAsync(
+            primaryFamily?.FamilyLabel,
+            null,
+            bomItem.SizeVariants.Count > 0 ? bomItem.SizeVariants : null,
+            bomItem.Synonyms,
+            cancellationToken);
+
+        _logger.LogInformation("Found {ProductCount} products matching family criteria", products.Count);
+
+        // Get enriched data
+        var productIds = products.Select(p => p.ProductId).ToList();
+        var enrichedData = await _productEnrichedRepository.GetEnrichedDataAsync(productIds, cancellationToken);
+        var enrichedLookup = enrichedData.ToDictionary(e => e.ProductId, e => e);
+
+        var matches = products.Select(p => CreateProductMatch(p, enrichedLookup)).ToList();
+
+        return (matches, warnings, primaryFamily, products.FirstOrDefault()?.CsiSectionCode ?? csiCode);
+    }
+
+    /// <summary>
+    /// Direct semantic search on products (ProductFirst mode)
+    /// Returns enriched ProductMatch with all available data (same richness as FamilyFirst)
+    /// </summary>
+    private async Task<(List<ProductMatch> Matches, List<string> Warnings, string? FamilyLabel, string? CsiCode)> 
+        SearchProductsSemanticAsync(string bomText, CancellationToken cancellationToken)
+    {
+        var warnings = new List<string>();
+
+        if (_semanticProductRepository == null)
+        {
+            warnings.Add("Semantic product repository not available");
+            return (new List<ProductMatch>(), warnings, null, null);
+        }
+
+        try
+        {
+            // Use LLM query parser to enrich the BOM text before embedding
+            var textToEmbed = bomText;
+            if (_queryParserService != null)
+            {
+                try
+                {
+                    var parsed = await _queryParserService.ParseAsync(bomText, cancellationToken);
+                    if (parsed.Success && !string.IsNullOrWhiteSpace(parsed.SearchQuery))
+                    {
+                        textToEmbed = parsed.SearchQuery;
+                        _logger.LogInformation(
+                            "LLM parsed '{OriginalText}' → '{EnrichedQuery}' (confidence: {Confidence:F2})",
+                            bomText, textToEmbed, parsed.Confidence);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Query parser returned no enriched query, using raw text");
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    _logger.LogWarning(parseEx, "Query parsing failed, falling back to raw BOM text");
+                }
+            }
+
+            // Generate embedding for the (possibly enriched) query
+            var embedding = await _embeddingService.GenerateEmbeddingAsync(textToEmbed, cancellationToken);
+
+            // Search products by semantic similarity
+            var semanticMatches = await _semanticProductRepository.SearchByEmbeddingAsync(
+                embedding,
+                _semanticSettings.SimilarityThreshold,
+                _semanticSettings.MatchCount,
+                cancellationToken);
+
+            _logger.LogInformation("Semantic search found {Count} products above threshold {Threshold}",
+                semanticMatches.Count, _semanticSettings.SimilarityThreshold);
+
+            // Derive family label from most common result
+            var familyLabel = semanticMatches
+                .Where(sm => !string.IsNullOrWhiteSpace(sm.FamilyLabel))
+                .GroupBy(sm => sm.FamilyLabel)
+                .OrderByDescending(g => g.Count())
+                .FirstOrDefault()?.Key;
+
+            // Derive CSI code from first non-null result
+            var csiCode = semanticMatches
+                .FirstOrDefault(sm => !string.IsNullOrWhiteSpace(sm.CsiCode))?.CsiCode;
+
+            // Enrich with vendor-specific data (same as FamilyFirst uses)
+            var productIds = semanticMatches.Select(sm => sm.ProductId).ToList();
+            var enrichedData = await _productEnrichedRepository.GetEnrichedDataAsync(productIds, cancellationToken);
+            var enrichedLookup = enrichedData.ToDictionary(e => e.ProductId, e => e);
+
+            _logger.LogDebug("Enriched {EnrichedCount}/{TotalCount} semantic matches with vendor data",
+                enrichedData.Count, semanticMatches.Count);
+
+            // Convert to fully-populated ProductMatch format
+            var matches = semanticMatches.Select(sm =>
+            {
+                enrichedLookup.TryGetValue(sm.ProductId, out var enriched);
+                return new ProductMatch
+                {
+                    ProductId = sm.ProductId,
+                    Vendor = sm.VendorName,
+                    ModelName = sm.ModelName,
+                    ModelCode = enriched?.ModelCode,
+                    CsiCode = sm.CsiCode,
+                    UseWhen = enriched?.UseWhen,
+                    KeyFeatures = ParseJsonArray(enriched?.KeyFeaturesJson),
+                    TechnicalSpecs = ParseJsonObject(enriched?.TechnicalSpecsJson),
+                    PerformanceData = ParseJsonObject(enriched?.PerformanceDataJson),
+                    SourceSchema = enriched?.SourceSchema,
+                    SemanticScore = sm.Similarity
+                };
+            }).ToList();
+
+            return (matches, warnings, familyLabel, csiCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Semantic product search failed");
+            warnings.Add($"Semantic search failed: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Fuse results from family-first and product-first searches
+    /// </summary>
+    private List<ProductMatch> FuseProductMatches(
+        List<ProductMatch> familyMatches,
+        List<ProductMatch> semanticMatches,
+        int limit)
+    {
+        // Create lookup for deduplication
+        var seen = new HashSet<string>();
+        var results = new List<ProductMatch>();
+
+        // Interleave results, preferring semantic matches (they have similarity scores)
+        var semanticQueue = new Queue<ProductMatch>(semanticMatches);
+        var familyQueue = new Queue<ProductMatch>(familyMatches);
+
+        while (results.Count < limit && (semanticQueue.Count > 0 || familyQueue.Count > 0))
+        {
+            // Take from semantic first (higher confidence)
+            if (semanticQueue.Count > 0)
+            {
+                var match = semanticQueue.Dequeue();
+                var key = $"{match.Vendor}:{match.ModelName}";
+                if (seen.Add(key))
+                {
+                    results.Add(match);
+                }
+            }
+
+            // Then take from family results
+            if (familyQueue.Count > 0 && results.Count < limit)
+            {
+                var match = familyQueue.Dequeue();
+                var key = $"{match.Vendor}:{match.ModelName}";
+                if (seen.Add(key))
+                {
+                    results.Add(match);
+                }
+            }
+        }
+
+        return results;
     }
 
     /// <summary>
