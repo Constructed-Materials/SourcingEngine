@@ -3,6 +3,7 @@ using Npgsql;
 using Pgvector;
 using SourcingEngine.Core.Models;
 using SourcingEngine.Core.Repositories;
+using SourcingEngine.Core.Services;
 
 namespace SourcingEngine.Data.Repositories;
 
@@ -62,13 +63,7 @@ public class MaterialFamilyRepository : IMaterialFamilyRepository
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                families.Add(new MaterialFamily
-                {
-                    FamilyLabel = reader.GetString(0),
-                    FamilyName = reader.IsDBNull(1) ? null : reader.GetString(1),
-                    CsiDivision = reader.IsDBNull(2) ? null : reader.GetString(2),
-                    TypicalLeadTimeDays = reader.IsDBNull(3) ? null : reader.GetInt32(3)
-                });
+                families.Add(MapMaterialFamily(reader));
             }
 
             _logger.LogDebug("Found {Count} material families for keywords: {Keywords}", 
@@ -129,13 +124,7 @@ public class MaterialFamilyRepository : IMaterialFamilyRepository
             int rank = 1;
             while (await reader.ReadAsync(cancellationToken))
             {
-                var family = new MaterialFamily
-                {
-                    FamilyLabel = reader.GetString(0),
-                    FamilyName = reader.IsDBNull(1) ? null : reader.GetString(1),
-                    CsiDivision = reader.IsDBNull(2) ? null : reader.GetString(2),
-                    TypicalLeadTimeDays = reader.IsDBNull(3) ? null : reader.GetInt32(3)
-                };
+                var family = MapMaterialFamily(reader);
                 var score = reader.GetFloat(4);
                 results.Add(new RankedMaterialFamily(family, rank++, score));
             }
@@ -186,7 +175,7 @@ public class MaterialFamilyRepository : IMaterialFamilyRepository
             command.CommandText = sql;
 
             // Convert float array to PostgreSQL vector string format: '[0.1,0.2,0.3,...]'
-            var vectorString = "[" + string.Join(",", embedding.Select(f => f.ToString("G9", System.Globalization.CultureInfo.InvariantCulture))) + "]";
+            var vectorString = EmbeddingUtilities.FormatPgVector(embedding);
             var embeddingParam = command.CreateParameter();
             embeddingParam.ParameterName = "embedding";
             embeddingParam.Value = vectorString;
@@ -201,13 +190,7 @@ public class MaterialFamilyRepository : IMaterialFamilyRepository
             int rank = 1;
             while (await reader.ReadAsync(cancellationToken))
             {
-                var family = new MaterialFamily
-                {
-                    FamilyLabel = reader.GetString(0),
-                    FamilyName = reader.IsDBNull(1) ? null : reader.GetString(1),
-                    CsiDivision = reader.IsDBNull(2) ? null : reader.GetString(2),
-                    TypicalLeadTimeDays = reader.IsDBNull(3) ? null : reader.GetInt32(3)
-                };
+                var family = MapMaterialFamily(reader);
                 var distance = reader.GetFloat(4);
                 // Convert distance to similarity score (1 - distance for cosine)
                 var score = 1.0f - distance;
@@ -289,14 +272,7 @@ public class MaterialFamilyRepository : IMaterialFamilyRepository
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                families.Add(new MaterialFamily
-                {
-                    FamilyLabel = reader.GetString(0),
-                    FamilyName = reader.IsDBNull(1) ? null : reader.GetString(1),
-                    CsiDivision = reader.IsDBNull(2) ? null : reader.GetString(2),
-                    TypicalLeadTimeDays = reader.IsDBNull(3) ? null : reader.GetInt32(3),
-                    Synonyms = reader.IsDBNull(4) ? null : reader.GetString(4)
-                });
+                families.Add(MapMaterialFamily(reader, synonymsOrdinal: 4));
             }
 
             _logger.LogDebug("Retrieved {Count} material families", families.Count);
@@ -308,5 +284,24 @@ public class MaterialFamilyRepository : IMaterialFamilyRepository
         }
 
         return families;
+    }
+
+    /// <summary>
+    /// Maps the first 4 columns of a reader row to a MaterialFamily.
+    /// Columns: family_label, family_name, csi_division, typical_lead_time_days
+    /// Optionally reads Synonyms from the specified column ordinal.
+    /// </summary>
+    private static MaterialFamily MapMaterialFamily(System.Data.Common.DbDataReader reader, int? synonymsOrdinal = null)
+    {
+        return new MaterialFamily
+        {
+            FamilyLabel = reader.GetString(0),
+            FamilyName = reader.IsDBNull(1) ? null : reader.GetString(1),
+            CsiDivision = reader.IsDBNull(2) ? null : reader.GetString(2),
+            TypicalLeadTimeDays = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+            Synonyms = synonymsOrdinal.HasValue && !reader.IsDBNull(synonymsOrdinal.Value) 
+                ? reader.GetString(synonymsOrdinal.Value) 
+                : null
+        };
     }
 }

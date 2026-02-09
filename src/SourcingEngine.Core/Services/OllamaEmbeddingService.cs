@@ -51,15 +51,15 @@ public class OllamaEmbeddingService : IEmbeddingService
             throw new ArgumentException("Text cannot be null or whitespace", nameof(text));
         }
 
-        var cacheKey = $"ollama_embedding:{_settings.EmbeddingModel}:{ComputeHash(text)}";
+        var cacheKey = $"ollama_embedding:{_settings.EmbeddingModel}:{EmbeddingUtilities.ComputeHash(text)}";
 
         if (_cache.TryGetValue(cacheKey, out float[]? cachedEmbedding) && cachedEmbedding != null)
         {
-            _logger.LogDebug("Embedding cache hit for: {Text}", TruncateForLog(text));
+            _logger.LogDebug("Embedding cache hit for: {Text}", EmbeddingUtilities.TruncateForLog(text));
             return cachedEmbedding;
         }
 
-        _logger.LogDebug("Generating Ollama embedding for: {Text}", TruncateForLog(text));
+        _logger.LogDebug("Generating Ollama embedding for: {Text}", EmbeddingUtilities.TruncateForLog(text));
 
         try
         {
@@ -118,7 +118,7 @@ public class OllamaEmbeddingService : IEmbeddingService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate embedding for text: {Text}", TruncateForLog(text));
+            _logger.LogError(ex, "Failed to generate embedding for text: {Text}", EmbeddingUtilities.TruncateForLog(text));
             throw;
         }
     }
@@ -152,50 +152,17 @@ public class OllamaEmbeddingService : IEmbeddingService
     /// <summary>
     /// Check if Ollama service is available
     /// </summary>
-    public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
+    public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var response = await _httpClient.GetAsync("/api/tags", cancellationToken);
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
+        return OllamaHealthCheck.IsModelAvailableAsync(_httpClient, _settings.EmbeddingModel, cancellationToken);
     }
 
     /// <summary>
     /// Check if the configured embedding model is available
     /// </summary>
-    public async Task<bool> IsModelAvailableAsync(CancellationToken cancellationToken = default)
+    public Task<bool> IsModelAvailableAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var response = await _httpClient.GetAsync("/api/tags", cancellationToken);
-            if (!response.IsSuccessStatusCode) return false;
-
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            return content.Contains(_settings.EmbeddingModel, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static string ComputeHash(string input)
-    {
-        using var sha256 = System.Security.Cryptography.SHA256.Create();
-        var bytes = System.Text.Encoding.UTF8.GetBytes(input.ToLowerInvariant().Trim());
-        var hash = sha256.ComputeHash(bytes);
-        return Convert.ToHexString(hash)[..16];
-    }
-
-    private static string TruncateForLog(string text, int maxLength = 50)
-    {
-        if (text.Length <= maxLength) return text;
-        return text[..maxLength] + "...";
+        return OllamaHealthCheck.IsModelAvailableAsync(_httpClient, _settings.EmbeddingModel, cancellationToken);
     }
 }
 

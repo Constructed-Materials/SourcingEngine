@@ -55,12 +55,26 @@ public class ProductEnrichedRepository : IProductEnrichedRepository
         return enrichedProducts;
     }
 
+    /// <summary>
+    /// Regex to validate schema names — only lowercase letters, digits, and underscores allowed.
+    /// Prevents SQL injection via schema name interpolation (schema names cannot be parameterized in PostgreSQL).
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex SafeSchemaNamePattern = 
+        new(@"^[a-z_][a-z0-9_]*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private async Task<List<ProductEnriched>> QuerySchemaAsync(
         string schemaName,
         List<Guid> productIds,
         CancellationToken cancellationToken)
     {
         var results = new List<ProductEnriched>();
+
+        // Validate schema name to prevent SQL injection (schema names can't be parameterized)
+        if (!SafeSchemaNamePattern.IsMatch(schemaName))
+        {
+            _logger.LogWarning("Rejected unsafe schema name: {SchemaName}", schemaName);
+            return results;
+        }
 
         try
         {

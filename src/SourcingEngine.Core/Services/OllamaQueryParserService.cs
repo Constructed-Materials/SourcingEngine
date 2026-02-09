@@ -255,20 +255,9 @@ Now parse this input and return ONLY valid JSON (no explanation):";
         }
     }
 
-    public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
+    public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var response = await _httpClient.GetAsync("/api/tags", cancellationToken);
-            if (!response.IsSuccessStatusCode) return false;
-
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            return content.Contains(_settings.ParsingModel, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
+        return OllamaHealthCheck.IsModelAvailableAsync(_httpClient, _settings.ParsingModel, cancellationToken);
     }
 }
 

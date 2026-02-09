@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using SourcingEngine.Core.Repositories;
+using SourcingEngine.Core.Services;
 
 namespace SourcingEngine.Data.Repositories;
 
@@ -143,7 +144,7 @@ public class SemanticProductRepository : ISemanticProductRepository
     {
         // Use string literal representation — compatible with all Npgsql versions
         // SQL uses ::vector cast to convert the string to a pgvector type
-        var vectorLiteral = "[" + string.Join(",", vector.Select(f => f.ToString("G9", CultureInfo.InvariantCulture))) + "]";
+        var vectorLiteral = EmbeddingUtilities.FormatPgVector(vector);
         var param = command.CreateParameter();
         param.ParameterName = name;
         param.Value = vectorLiteral;

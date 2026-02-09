@@ -36,11 +36,6 @@ public class DatabaseFixture : IAsyncLifetime
 
         var services = new ServiceCollection();
 
-        // Configuration
-        services.Configure<DatabaseSettings>(configuration.GetSection("Database"));
-        services.Configure<SemanticSearchSettings>(configuration.GetSection("SemanticSearch"));
-        services.Configure<OllamaSettings>(configuration.GetSection("Ollama"));
-
         // Logging
         services.AddLogging(builder =>
         {
@@ -48,42 +43,15 @@ public class DatabaseFixture : IAsyncLifetime
             builder.SetMinimumLevel(LogLevel.Debug);
         });
 
-        // Data layer
-        services.AddSingleton<IDbConnectionFactory, NpgsqlConnectionFactory>();
-        services.AddSingleton<ISchemaDiscoveryService, SchemaDiscoveryService>();
-        services.AddScoped<IMaterialFamilyRepository, MaterialFamilyRepository>();
-        services.AddScoped<IProductRepository, ProductRepository>();
-        services.AddScoped<IProductEnrichedRepository, ProductEnrichedRepository>();
-        services.AddScoped<ISemanticProductRepository, SemanticProductRepository>();
+        // Register all SourcingEngine services via shared extension
+        services.AddSourcingEngine(configuration);
 
-        // Core services
-        services.AddMemoryCache();
-        services.AddSingleton<ISizeCalculator, SizeCalculator>();
-        services.AddSingleton<ISynonymExpander, SynonymExpander>();
-        services.AddSingleton<IInputNormalizer, InputNormalizer>();
-        services.AddSingleton<IProductEmbeddingTextBuilder, ProductEmbeddingTextBuilder>();
-        services.AddSingleton<ISearchFusionService, RrfFusionService>();
-
-        // Check Ollama availability and register appropriate services
+        // Check Ollama availability for test skip support
         var ollamaSettings = configuration.GetSection("Ollama").Get<OllamaSettings>();
         if (ollamaSettings?.Enabled == true)
         {
-            IsOllamaAvailable = await CheckOllamaAvailableAsync(ollamaSettings.BaseUrl);
+            IsOllamaAvailable = await OllamaHealthCheck.IsAvailableAsync(ollamaSettings.BaseUrl);
         }
-
-        if (IsOllamaAvailable)
-        {
-            // Use Ollama for embeddings (768d nomic-embed-text) and query parsing (llama3.2:3b)
-            services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
-            services.AddHttpClient<IQueryParserService, OllamaQueryParserService>();
-        }
-        else
-        {
-            // Fallback: local embedding service (384d bge-micro-v2), no query parser
-            services.AddSingleton<IEmbeddingService, LocalEmbeddingService>();
-        }
-
-        services.AddScoped<ISearchOrchestrator, SearchOrchestrator>();
 
         ServiceProvider = services.BuildServiceProvider();
 
@@ -103,23 +71,6 @@ public class DatabaseFixture : IAsyncLifetime
 
     public T GetService<T>() where T : notnull => ServiceProvider.GetRequiredService<T>();
     public IServiceScope CreateScope() => ServiceProvider.CreateScope();
-
-    /// <summary>
-    /// Quick health check: can we reach the Ollama API?
-    /// </summary>
-    private static async Task<bool> CheckOllamaAvailableAsync(string baseUrl)
-    {
-        try
-        {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            var response = await httpClient.GetAsync($"{baseUrl.TrimEnd('/')}/api/tags");
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
 }
 
 /// <summary>
