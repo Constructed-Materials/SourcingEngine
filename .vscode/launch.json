@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Generate Embeddings (All)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Console/bin/Debug/net9.0/SourcingEngine.Console.dll",
+            "args": ["--generate-embeddings", "--all"],
+            "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Console",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Search Query",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Console/bin/Debug/net9.0/SourcingEngine.Console.dll",
+            "args": ["8 inch masonry block"],
+            "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Console",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        }
+    ]
+}

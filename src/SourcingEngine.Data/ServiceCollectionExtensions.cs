@@ -43,9 +43,19 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IProductEmbeddingTextBuilder, ProductEmbeddingTextBuilder>();
         services.AddSingleton<ISearchFusionService, RrfFusionService>();
 
-        // Embedding & LLM services — conditional on Ollama config
+        // Embedding & LLM services — conditional on provider config
+        // Priority: Bedrock > Ollama > Local fallback
+        var bedrockSettings = configuration.GetSection("Bedrock").Get<BedrockSettings>();
         var ollamaSettings = configuration.GetSection("Ollama").Get<OllamaSettings>();
-        if (ollamaSettings?.Enabled == true)
+
+        if (bedrockSettings?.Enabled == true)
+        {
+            // AWS Bedrock — for cloud deployments (ECS/Lambda)
+            services.Configure<BedrockSettings>(configuration.GetSection("Bedrock"));
+            services.AddSingleton<IEmbeddingService, BedrockEmbeddingService>();
+            services.AddSingleton<IQueryParserService, BedrockQueryParserService>();
+        }
+        else if (ollamaSettings?.Enabled == true)
         {
             services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
             services.AddHttpClient<IQueryParserService, OllamaQueryParserService>();
@@ -53,6 +63,7 @@ public static class ServiceCollectionExtensions
         else
         {
             services.AddSingleton<IEmbeddingService, LocalEmbeddingService>();
+            // IQueryParserService not registered — ProductFirstStrategy handles null gracefully
         }
 
         // Search strategies (registered as ISearchStrategy for collection injection)
