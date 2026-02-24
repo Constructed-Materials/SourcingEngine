@@ -1,0 +1,95 @@
+{
+  "rabbit_version": "3.13.0",
+  "users": [
+    {
+      "name": "guest",
+      "password_hash": "guest",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    }
+  ],
+  "vhosts": [
+    { "name": "/" }
+  ],
+  "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "bom.extraction",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "bom.extraction.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "bom-extraction-queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "bom.extraction.dlx",
+        "x-dead-letter-routing-key": "extract.poison"
+      }
+    },
+    {
+      "name": "bom-extraction-result-queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "bom-extraction-poison-queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "bom.extraction",
+      "vhost": "/",
+      "destination": "bom-extraction-queue",
+      "destination_type": "queue",
+      "routing_key": "extract.request",
+      "arguments": {}
+    },
+    {
+      "source": "bom.extraction",
+      "vhost": "/",
+      "destination": "bom-extraction-result-queue",
+      "destination_type": "queue",
+      "routing_key": "extract.result",
+      "arguments": {}
+    },
+    {
+      "source": "bom.extraction.dlx",
+      "vhost": "/",
+      "destination": "bom-extraction-poison-queue",
+      "destination_type": "queue",
+      "routing_key": "extract.poison",
+      "arguments": {}
+    }
+  ]
+}

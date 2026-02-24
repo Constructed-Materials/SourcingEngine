@@ -1,0 +1,28 @@
+# Local development stack for BOM Extraction Lambda
+# Usage: docker compose -f docker-compose.local.yml up -d
+#
+# This starts a local RabbitMQ broker for testing the Lambda function
+# without hitting the production Amazon MQ broker.
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: bom-rabbitmq-local
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rabbitmq-data:

@@ -93,3 +93,13 @@ secrets.json
 # NCrunch
 *.ncrunch*
 _NCrunch_*
+
+# AWS CDK
+aws-cdk/
+cdk.out/
+*.d.ts
+*.js
+!*.js.snapshot
+!*.d.ts.snapshot
+node_modules/
+

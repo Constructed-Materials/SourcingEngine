@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <RootNamespace>SourcingEngine.BomExtraction.Tests</RootNamespace>
+    <RootNamespace>SourcingEngine.BomExtraction.Lambda.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,20 +21,13 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
+    <PackageReference Include="Amazon.Lambda.Core" Version="2.8.1" />
+    <PackageReference Include="Amazon.Lambda.MQEvents" Version="2.1.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.16" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\SourcingEngine.BomExtraction\SourcingEngine.BomExtraction.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Update="TestData\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <ProjectReference Include="..\..\src\SourcingEngine.BomExtraction.Lambda\SourcingEngine.BomExtraction.Lambda.csproj" />
   </ItemGroup>
 
 </Project>

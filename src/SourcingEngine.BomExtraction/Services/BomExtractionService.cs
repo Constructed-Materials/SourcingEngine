@@ -131,11 +131,13 @@ public class BomExtractionService : IBomExtractionService, IDisposable
         {
             result.Warnings.Add($"JSON parsing failed: {ex.Message}");
             _logger.LogError(ex, "Failed to parse BOM extraction response for {FilePath}", filePath);
+            throw;
         }
         catch (AmazonBedrockRuntimeException ex)
         {
             result.Warnings.Add($"Bedrock API error: {ex.Message}");
             _logger.LogError(ex, "Bedrock API error during extraction of {FilePath}", filePath);
+            throw;
         }
 
         result.ExtractedAt = DateTime.UtcNow;

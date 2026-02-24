@@ -1,0 +1,18 @@
+{
+  "eventSource": "aws:rmq",
+  "eventSourceArn": "arn:aws:mq:us-east-2:866934058848:broker:cm-app-queue:b-24d11402-33d4-43b1-91a8-4725eb95eade",
+  "rmqMessagesByQueue": {
+    "bom-extraction-queue::/": [
+      {
+        "basicProperties": {
+          "contentType": "application/json",
+          "headers": {
+            "trace_id": "test-trace-001"
+          }
+        },
+        "redelivered": false,
+        "data": "eyJ0cmFjZUlkIjogIjc5NTlkN2IxLWQzZjYtNGM4OS04ZTAwLTFjZjJjMjIxMWQ3MSIsICJwcm9qZWN0SWQiOiAiZDJlZTk1YjAtYmFhNy00MWFiLWJiZDUtNjdlZGZiNGM3ZDcyIiwgImJvbUZpbGVzIjogW3siZmlsZU5hbWUiOiAiYm9tLTIueGxzeCIsICJ1cmwiOiAiUkVQTEFDRV9XSVRIX1lPVVJfUFJFU0lHTkVEX1VSTCJ9XX0="
+      }
+    ]
+  }
+}

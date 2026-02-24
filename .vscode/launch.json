@@ -22,6 +22,33 @@
             "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Console",
             "console": "integratedTerminal",
             "stopAtEntry": false
+        },
+        {
+            "name": "Lambda: Local RabbitMQ Consumer",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.BomExtraction.Lambda.LocalRunner/bin/Debug/net9.0/SourcingEngine.BomExtraction.Lambda.LocalRunner.dll",
+            "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.BomExtraction.Lambda.LocalRunner",
+            "console": "integratedTerminal",
+            "stopAtEntry": false,
+            "env": {
+                "AWS_PROFILE": "default",
+                "AWS_REGION": "us-east-2"
+            }
+        },
+        {
+            "name": "Lambda: Replay Event File",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.BomExtraction.Lambda.LocalRunner/bin/Debug/net9.0/SourcingEngine.BomExtraction.Lambda.LocalRunner.dll",
+            "args": ["--event", "${workspaceFolder:SourcingEngine}/src/SourcingEngine.BomExtraction.Lambda/local/test-event-template.json"],
+            "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.BomExtraction.Lambda.LocalRunner",
+            "console": "integratedTerminal",
+            "stopAtEntry": false,
+            "env": {
+                "AWS_PROFILE": "default",
+                "AWS_REGION": "us-east-2"
+            }
         }
     ]
 }
