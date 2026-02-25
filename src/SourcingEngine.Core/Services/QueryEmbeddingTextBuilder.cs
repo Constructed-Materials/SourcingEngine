@@ -14,6 +14,8 @@ public interface IQueryEmbeddingTextBuilder
     /// <summary>
     /// Build structured embedding text from a BOM line item and its LLM-parsed data.
     /// The output format mirrors the <c>[SECTION]</c> tags used by <see cref="ProductEmbeddingTextBuilder"/>.
+    /// The LLM-generated <see cref="ParsedBomQuery.SearchQuery"/> (synonym-expanded, multi-unit text)
+    /// is merged into the <c>[DESCRIPTION]</c> section to boost recall without breaking structural alignment.
     /// </summary>
     string BuildQueryEmbeddingText(BomLineItem item, ParsedBomQuery parsedQuery);
 }
@@ -39,8 +41,13 @@ public class QueryEmbeddingTextBuilder : IQueryEmbeddingTextBuilder
         var specs = BuildTechnicalSpecs(parsedQuery);
         AppendSection(sb, "TECHNICALSPECS", specs);
 
-        // [DESCRIPTION] — the full spec text (closest analog to product description)
-        AppendSection(sb, "DESCRIPTION", item.Spec);
+        // [DESCRIPTION] — enriched: raw spec text + LLM synonym/size-expanded search query
+        // The SearchQuery from the LLM contains synonyms and unit conversions
+        // (e.g., "8 inch 200 mm 20 cm CMU concrete masonry unit concrete block").
+        // Merging it into [DESCRIPTION] pushes the query vector closer to products
+        // described in any of these variant terms, while keeping [SECTION] alignment intact.
+        var descriptionText = BuildEnrichedDescription(item.Spec, parsedQuery.SearchQuery);
+        AppendSection(sb, "DESCRIPTION", descriptionText);
 
         // [USE] — attributes that imply usage context (color, grade, finish, etc.)
         var attributes = BuildAttributesText(parsedQuery);
@@ -53,6 +60,41 @@ public class QueryEmbeddingTextBuilder : IQueryEmbeddingTextBuilder
             item.BomItem, result.Length);
 
         return result;
+    }
+
+    /// <summary>
+    /// Merge the raw spec text with the LLM-expanded search query, deduplicating
+    /// overlapping tokens so the embedding isn't inflated with repeated terms.
+    /// </summary>
+    internal static string BuildEnrichedDescription(string? spec, string? searchQuery)
+    {
+        var specText = spec?.Trim() ?? string.Empty;
+        var queryText = searchQuery?.Trim() ?? string.Empty;
+
+        // If no search query or it's identical to the spec, just return spec
+        if (string.IsNullOrWhiteSpace(queryText) ||
+            string.Equals(specText, queryText, StringComparison.OrdinalIgnoreCase))
+        {
+            return specText;
+        }
+
+        // Split both into tokens, deduplicate (case-insensitive), preserve order
+        var specTokens = specText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var seen = new HashSet<string>(specTokens, StringComparer.OrdinalIgnoreCase);
+
+        var additional = new List<string>();
+        foreach (var token in queryText.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (seen.Add(token))
+            {
+                additional.Add(token);
+            }
+        }
+
+        if (additional.Count == 0)
+            return specText;
+
+        return $"{specText} {string.Join(' ', additional)}";
     }
 
     private static string BuildTechnicalSpecs(ParsedBomQuery parsedQuery)

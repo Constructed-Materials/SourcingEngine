@@ -13,6 +13,17 @@
             "stopAtEntry": false
         },
         {
+            "name": "Generate Embeddings (Missing Only)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Console/bin/Debug/net9.0/SourcingEngine.Console.dll",
+            "args": ["--generate-embeddings", "--missing"],
+            "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Console",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
             "name": "Search Query",
             "type": "coreclr",
             "request": "launch",

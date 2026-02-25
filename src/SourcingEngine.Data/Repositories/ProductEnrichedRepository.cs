@@ -1,26 +1,31 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SourcingEngine.Core.Models;
 using SourcingEngine.Core.Repositories;
 
 namespace SourcingEngine.Data.Repositories;
 
 /// <summary>
-/// Product enriched repository with parallel schema querying
+/// Product enriched repository with throttled parallel schema querying.
+/// Uses a SemaphoreSlim to avoid exhausting Supabase Session Pooler connections.
 /// </summary>
 public class ProductEnrichedRepository : IProductEnrichedRepository
 {
     private readonly IDbConnectionFactory _connectionFactory;
     private readonly ISchemaDiscoveryService _schemaDiscovery;
     private readonly ILogger<ProductEnrichedRepository> _logger;
+    private readonly SemaphoreSlim _semaphore;
 
     public ProductEnrichedRepository(
         IDbConnectionFactory connectionFactory,
         ISchemaDiscoveryService schemaDiscovery,
+        IOptions<DatabaseSettings> settings,
         ILogger<ProductEnrichedRepository> logger)
     {
         _connectionFactory = connectionFactory;
         _schemaDiscovery = schemaDiscovery;
         _logger = logger;
+        _semaphore = new SemaphoreSlim(settings.Value.MaxConcurrentSchemaQueries);
     }
 
     public async Task<List<ProductEnriched>> GetEnrichedDataAsync(
@@ -35,12 +40,12 @@ public class ProductEnrichedRepository : IProductEnrichedRepository
 
         var schemas = await _schemaDiscovery.GetVendorSchemasAsync(cancellationToken);
         
-        _logger.LogInformation("Querying {SchemaCount} vendor schemas in parallel for {ProductCount} products",
-            schemas.Count, productIdList.Count);
+        _logger.LogInformation("Querying {SchemaCount} vendor schemas (max {MaxConcurrent} concurrent) for {ProductCount} products",
+            schemas.Count, _semaphore.CurrentCount, productIdList.Count);
 
-        // Query all schemas in parallel
+        // Query all schemas in parallel, throttled by semaphore to avoid connection pool exhaustion
         var tasks = schemas.Select(schema => 
-            QuerySchemaAsync(schema, productIdList, cancellationToken));
+            ThrottledQuerySchemaAsync(schema, productIdList, cancellationToken));
 
         var results = await Task.WhenAll(tasks);
 
@@ -61,6 +66,25 @@ public class ProductEnrichedRepository : IProductEnrichedRepository
     /// </summary>
     private static readonly System.Text.RegularExpressions.Regex SafeSchemaNamePattern = 
         new(@"^[a-z_][a-z0-9_]*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Throttle concurrent schema queries to stay within Supabase connection pool limits.
+    /// </summary>
+    private async Task<List<ProductEnriched>> ThrottledQuerySchemaAsync(
+        string schemaName,
+        List<Guid> productIds,
+        CancellationToken cancellationToken)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            return await QuerySchemaAsync(schemaName, productIds, cancellationToken);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
 
     private async Task<List<ProductEnriched>> QuerySchemaAsync(
         string schemaName,
