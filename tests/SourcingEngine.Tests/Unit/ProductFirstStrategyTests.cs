@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using SourcingEngine.Common.Models;
 using SourcingEngine.Core.Configuration;
 using SourcingEngine.Core.Models;
 using SourcingEngine.Core.Repositories;
@@ -11,44 +12,44 @@ namespace SourcingEngine.Tests.Unit;
 
 /// <summary>
 /// Comprehensive unit tests for ProductFirstStrategy.
-/// Mocks all dependencies so tests run without a database or Ollama.
+/// Mocks all dependencies so tests run without a database or external services.
 /// </summary>
 public class ProductFirstStrategyTests
 {
     private readonly Mock<ISemanticProductRepository> _semanticRepoMock;
     private readonly Mock<IProductEnrichedRepository> _enrichedRepoMock;
-    private readonly Mock<IMaterialFamilyRepository> _familyRepoMock;
     private readonly Mock<IEmbeddingService> _embeddingMock;
     private readonly Mock<IQueryParserService> _queryParserMock;
+    private readonly Mock<IQueryEmbeddingTextBuilder> _queryEmbeddingTextBuilderMock;
     private readonly Mock<ILogger<ProductFirstStrategy>> _loggerMock;
     private readonly SemanticSearchSettings _settings;
 
-    private ProductFirstStrategy CreateStrategy(IQueryParserService? queryParser = null)
+    private ProductFirstStrategy CreateStrategy()
     {
         return new ProductFirstStrategy(
             _semanticRepoMock.Object,
             _enrichedRepoMock.Object,
-            _familyRepoMock.Object,
             _embeddingMock.Object,
+            _queryParserMock.Object,
+            _queryEmbeddingTextBuilderMock.Object,
             Options.Create(_settings),
-            _loggerMock.Object,
-            queryParser);
+            _loggerMock.Object);
     }
 
     public ProductFirstStrategyTests()
     {
         _semanticRepoMock = new Mock<ISemanticProductRepository>();
         _enrichedRepoMock = new Mock<IProductEnrichedRepository>();
-        _familyRepoMock = new Mock<IMaterialFamilyRepository>();
         _embeddingMock = new Mock<IEmbeddingService>();
         _queryParserMock = new Mock<IQueryParserService>();
+        _queryEmbeddingTextBuilderMock = new Mock<IQueryEmbeddingTextBuilder>();
         _loggerMock = new Mock<ILogger<ProductFirstStrategy>>();
 
         _settings = new SemanticSearchSettings
         {
             Enabled = true,
-            SimilarityThreshold = 0.5f,
-            MatchCount = 10
+            SimilarityThreshold = 0.3f,
+            MatchCount = 20
         };
 
         // Default: embedding service returns a valid vector
@@ -58,14 +59,28 @@ public class ProductFirstStrategyTests
         // Default: enriched repo returns empty
         _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(It.IsAny<List<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ProductEnriched>());
+
+        // Default: query parser succeeds with basic result
+        _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedBomQuery
+            {
+                Success = true,
+                SearchQuery = "parsed query",
+                Confidence = 0.9f,
+                MaterialFamily = "cmu_blocks",
+                TechnicalSpecs = new TechnicalSpecs()
+            });
+
+        // Default: query embedding text builder returns structured text
+        _queryEmbeddingTextBuilderMock
+            .Setup(b => b.BuildQueryEmbeddingText(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>()))
+            .Returns<BomLineItem, ParsedBomQuery>((item, _) => $"[DESCRIPTION] {item.Spec}");
     }
 
-    private static BomItem MakeBomItem(string text) => new()
+    private static BomLineItem MakeItem(string spec, string? bomItem = null) => new()
     {
-        RawText = text,
-        Keywords = [text],
-        Synonyms = [text],
-        SizeVariants = []
+        BomItem = bomItem ?? spec,
+        Spec = spec
     };
 
     private static SemanticProductMatch MakeMatch(
@@ -80,32 +95,19 @@ public class ProductFirstStrategyTests
         Similarity = similarity
     };
 
-    // ── Mode property ──────────────────────────────────────────────
-
-    [Fact]
-    public void Mode_ReturnsProductFirst()
-    {
-        var sut = CreateStrategy();
-        Assert.Equal(SemanticSearchMode.ProductFirst, sut.Mode);
-    }
-
     // ── Basic search flow ──────────────────────────────────────────
 
     [Fact]
     public async Task ExecuteAsync_WithMatches_ReturnsProductMatches()
     {
-        // Arrange
         var match = MakeMatch("Acme", "Widget-100", "cmu_blocks", "042200", 0.85f);
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
                 It.IsAny<float[]>(), _settings.SimilarityThreshold, _settings.MatchCount, It.IsAny<CancellationToken>()))
             .ReturnsAsync([match]);
 
         var sut = CreateStrategy();
+        var result = await sut.ExecuteAsync(MakeItem("8 inch cmu block"), CancellationToken.None);
 
-        // Act
-        var result = await sut.ExecuteAsync("8 inch cmu block", MakeBomItem("8 inch cmu block"), CancellationToken.None);
-
-        // Assert
         Assert.Single(result.Matches);
         Assert.Equal("Acme", result.Matches[0].Vendor);
         Assert.Equal("Widget-100", result.Matches[0].ModelName);
@@ -120,10 +122,98 @@ public class ProductFirstStrategyTests
             .ReturnsAsync(new List<SemanticProductMatch>());
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("nonexistent product", MakeBomItem("nonexistent product"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("nonexistent product"), CancellationToken.None);
 
         Assert.Empty(result.Matches);
-        Assert.Empty(result.Warnings);
+    }
+
+    // ── LLM query parsing ──────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_UsesQueryEmbeddingTextBuilder_WhenParserSucceeds()
+    {
+        _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedBomQuery
+            {
+                Success = true,
+                SearchQuery = "concrete masonry unit block 8 inch load bearing",
+                MaterialFamily = "cmu_blocks",
+                Confidence = 0.9f,
+                TechnicalSpecs = new TechnicalSpecs()
+            });
+
+        _queryEmbeddingTextBuilderMock
+            .Setup(b => b.BuildQueryEmbeddingText(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>()))
+            .Returns("[FAMILY] cmu_blocks\n[DESCRIPTION] 8 inch cmu");
+
+        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
+                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SemanticProductMatch>());
+
+        var sut = CreateStrategy();
+        await sut.ExecuteAsync(MakeItem("8 inch cmu"), CancellationToken.None);
+
+        // The structured embedding text should be passed to the embedding service
+        _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
+            "[FAMILY] cmu_blocks\n[DESCRIPTION] 8 inch cmu", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FallsBackToRawText_WhenParserFails()
+    {
+        _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("LLM unavailable"));
+
+        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
+                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SemanticProductMatch>());
+
+        var sut = CreateStrategy();
+        var result = await sut.ExecuteAsync(MakeItem("cmu block"), CancellationToken.None);
+
+        // Should fall back to the original spec text
+        _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
+            "cmu block", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(result.Warnings, w => w.Contains("LLM parsing failed"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FallsBackToRawText_WhenParserReturnsFailure()
+    {
+        _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedBomQuery
+            {
+                Success = false,
+                ErrorMessage = "Could not parse",
+                SearchQuery = "",
+                TechnicalSpecs = new TechnicalSpecs()
+            });
+
+        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
+                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SemanticProductMatch>());
+
+        var sut = CreateStrategy();
+        var result = await sut.ExecuteAsync(MakeItem("stucco eifs"), CancellationToken.None);
+
+        _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
+            "stucco eifs", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(result.Warnings, w => w.Contains("LLM parsing failed"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsesBomItem_WhenSpecIsEmpty()
+    {
+        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
+                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SemanticProductMatch>());
+
+        var sut = CreateStrategy();
+        var item = new BomLineItem { BomItem = "floor joist", Spec = "" };
+        await sut.ExecuteAsync(item, CancellationToken.None);
+
+        // When Spec is empty, should use BomItem as input
+        _queryParserMock.Verify(p => p.ParseAsync("floor joist", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Family label derivation ────────────────────────────────────
@@ -142,7 +232,7 @@ public class ProductFirstStrategyTests
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("block", MakeBomItem("block"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("block"), CancellationToken.None);
 
         Assert.Equal("cmu_blocks", result.FamilyLabel);
     }
@@ -160,7 +250,7 @@ public class ProductFirstStrategyTests
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("query", MakeBomItem("query"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("query"), CancellationToken.None);
 
         Assert.Null(result.FamilyLabel);
     }
@@ -181,7 +271,7 @@ public class ProductFirstStrategyTests
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("block", MakeBomItem("block"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("block"), CancellationToken.None);
 
         Assert.Equal("042200", result.CsiCode);
     }
@@ -214,7 +304,7 @@ public class ProductFirstStrategyTests
             ]);
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("curtain wall", MakeBomItem("curtain wall"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("curtain wall"), CancellationToken.None);
 
         var match = Assert.Single(result.Matches);
         Assert.Equal("Commercial storefront applications", match.UseWhen);
@@ -227,7 +317,6 @@ public class ProductFirstStrategyTests
     [Fact]
     public async Task ExecuteAsync_HandlesPartialEnrichment_Gracefully()
     {
-        // 3 semantic matches, only 1 has enriched data
         var id1 = Guid.NewGuid();
         var id2 = Guid.NewGuid();
         var id3 = Guid.NewGuid();
@@ -248,103 +337,29 @@ public class ProductFirstStrategyTests
             ]);
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("query", MakeBomItem("query"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("query"), CancellationToken.None);
 
         Assert.Equal(3, result.Matches.Count);
-        Assert.Null(result.Matches[0].UseWhen);     // No enrichment
-        Assert.Equal("Indoor use", result.Matches[1].UseWhen);  // Enriched
-        Assert.Null(result.Matches[2].UseWhen);     // No enrichment
-    }
-
-    // ── LLM query enrichment ──────────────────────────────────────
-
-    [Fact]
-    public async Task ExecuteAsync_UsesEnrichedQuery_WhenParserSucceeds()
-    {
-        _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ParsedBomQuery
-            {
-                Success = true,
-                SearchQuery = "concrete masonry unit block 8 inch load bearing",
-                Confidence = 0.9f
-            });
-
-        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<SemanticProductMatch>());
-
-        var sut = CreateStrategy(_queryParserMock.Object);
-        await sut.ExecuteAsync("8 inch cmu", MakeBomItem("8 inch cmu"), CancellationToken.None);
-
-        // The enriched query should be passed to the embedding service
-        _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
-            "concrete masonry unit block 8 inch load bearing", It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_FallsBackToRawText_WhenParserFails()
-    {
-        _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("LLM unavailable"));
-
-        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<SemanticProductMatch>());
-
-        var sut = CreateStrategy(_queryParserMock.Object);
-        await sut.ExecuteAsync("cmu block", MakeBomItem("cmu block"), CancellationToken.None);
-
-        // Should fall back to the original text
-        _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
-            "cmu block", It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_FallsBackToRawText_WhenParserReturnsEmpty()
-    {
-        _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ParsedBomQuery { Success = true, SearchQuery = "", Confidence = 0.1f });
-
-        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<SemanticProductMatch>());
-
-        var sut = CreateStrategy(_queryParserMock.Object);
-        await sut.ExecuteAsync("stucco eifs", MakeBomItem("stucco eifs"), CancellationToken.None);
-
-        _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
-            "stucco eifs", It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_WithoutParser_UsesRawText()
-    {
-        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<SemanticProductMatch>());
-
-        var sut = CreateStrategy(queryParser: null);
-        await sut.ExecuteAsync("floor joist 12 inch", MakeBomItem("floor joist 12 inch"), CancellationToken.None);
-
-        _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
-            "floor joist 12 inch", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Null(result.Matches[0].UseWhen);
+        Assert.Equal("Indoor use", result.Matches[1].UseWhen);
+        Assert.Null(result.Matches[2].UseWhen);
     }
 
     // ── Error handling ─────────────────────────────────────────────
 
     [Fact]
-    public async Task ExecuteAsync_EmbeddingFailure_ThrowsWithWarning()
+    public async Task ExecuteAsync_EmbeddingFailure_Throws()
     {
         _embeddingMock.Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Ollama down"));
+            .ThrowsAsync(new HttpRequestException("Service unavailable"));
 
         var sut = CreateStrategy();
         await Assert.ThrowsAsync<HttpRequestException>(() =>
-            sut.ExecuteAsync("test", MakeBomItem("test"), CancellationToken.None));
+            sut.ExecuteAsync(MakeItem("test"), CancellationToken.None));
     }
 
     [Fact]
-    public async Task ExecuteAsync_SemanticRepoFailure_ThrowsAndLogsWarning()
+    public async Task ExecuteAsync_SemanticRepoFailure_Throws()
     {
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
                 It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -352,7 +367,7 @@ public class ProductFirstStrategyTests
 
         var sut = CreateStrategy();
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            sut.ExecuteAsync("test", MakeBomItem("test"), CancellationToken.None));
+            sut.ExecuteAsync(MakeItem("test"), CancellationToken.None));
     }
 
     // ── Similarity scores ──────────────────────────────────────────
@@ -371,7 +386,7 @@ public class ProductFirstStrategyTests
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("block", MakeBomItem("block"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("block"), CancellationToken.None);
 
         Assert.Equal(0.95f, result.Matches[0].SemanticScore);
         Assert.Equal(0.72f, result.Matches[1].SemanticScore);
@@ -386,14 +401,14 @@ public class ProductFirstStrategyTests
         _settings.MatchCount = 5;
 
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), 0.5f, 5, It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), 0.3f, 5, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SemanticProductMatch>());
 
         var sut = CreateStrategy();
-        await sut.ExecuteAsync("query", MakeBomItem("query"), CancellationToken.None);
+        await sut.ExecuteAsync(MakeItem("query"), CancellationToken.None);
 
         _semanticRepoMock.Verify(r => r.SearchByEmbeddingAsync(
-            It.IsAny<float[]>(), 0.5f, 5, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<float[]>(), 0.3f, 5, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -406,7 +421,7 @@ public class ProductFirstStrategyTests
             .ReturnsAsync(new List<SemanticProductMatch>());
 
         var sut = CreateStrategy();
-        await sut.ExecuteAsync("query", MakeBomItem("query"), CancellationToken.None);
+        await sut.ExecuteAsync(MakeItem("query"), CancellationToken.None);
 
         _semanticRepoMock.Verify(r => r.SearchByEmbeddingAsync(
             It.IsAny<float[]>(), 0.7f, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -425,7 +440,7 @@ public class ProductFirstStrategyTests
 
         var sut = CreateStrategy();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            sut.ExecuteAsync("query", MakeBomItem("query"), cts.Token));
+            sut.ExecuteAsync(MakeItem("query"), cts.Token));
     }
 
     // ── JSON parsing edge cases (via enrichment) ───────────────────
@@ -451,9 +466,8 @@ public class ProductFirstStrategyTests
             ]);
 
         var sut = CreateStrategy();
-        var result = await sut.ExecuteAsync("test", MakeBomItem("test"), CancellationToken.None);
+        var result = await sut.ExecuteAsync(MakeItem("test"), CancellationToken.None);
 
-        // Should gracefully return null for broken JSON fields
         var match = Assert.Single(result.Matches);
         Assert.Null(match.KeyFeatures);
         Assert.Null(match.TechnicalSpecs);

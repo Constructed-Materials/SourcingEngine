@@ -1,6 +1,5 @@
 using System.Text.Json;
-using SourcingEngine.BomExtraction.Lambda.Models;
-using SourcingEngine.BomExtraction.Models;
+using SourcingEngine.Common.Models;
 
 namespace SourcingEngine.BomExtraction.Lambda.Tests;
 

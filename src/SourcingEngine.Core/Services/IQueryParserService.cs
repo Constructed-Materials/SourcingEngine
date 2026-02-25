@@ -11,7 +11,9 @@ public class ParsedBomQuery
     public string? MaterialFamily { get; set; }
 
     /// <summary>
-    /// Extracted dimensions normalized to standard format
+    /// Generic technical specifications extracted from the BOM item.
+    /// Key-value pairs like "width" → "8 in", "u_factor" → "0.30", "r_value" → "R-19".
+    /// Product-type agnostic — supports any material category.
     /// </summary>
     public TechnicalSpecs TechnicalSpecs { get; set; } = new();
 
@@ -47,61 +49,29 @@ public class ParsedBomQuery
 }
 
 /// <summary>
-/// Technical specifications extracted from BOM line item
+/// Generic technical specifications extracted from a BOM line item.
+/// Uses a flexible dictionary to support any material type (windows, CMU, insulation, etc.)
+/// without hardcoded dimension fields.
 /// </summary>
 public class TechnicalSpecs
 {
     /// <summary>
-    /// Width in inches (null if not specified)
+    /// Key-value specification pairs. Keys are lowercase spec names (e.g., "width", "height",
+    /// "u_factor", "r_value", "diameter"), values include units (e.g., "8 in", "0.30", "R-19").
     /// </summary>
-    public double? WidthInches { get; set; }
+    public Dictionary<string, string> Specs { get; set; } = new();
 
     /// <summary>
-    /// Height in inches (null if not specified)
-    /// </summary>
-    public double? HeightInches { get; set; }
-
-    /// <summary>
-    /// Length/Depth in inches (null if not specified)
-    /// </summary>
-    public double? LengthInches { get; set; }
-
-    /// <summary>
-    /// Thickness in inches (null if not specified)
-    /// </summary>
-    public double? ThicknessInches { get; set; }
-
-    /// <summary>
-    /// Diameter in inches (null if not specified)
-    /// </summary>
-    public double? DiameterInches { get; set; }
-
-    /// <summary>
-    /// Formatted string for embedding: "8x8x16in" or "4in thick"
+    /// Formatted string for embedding, aligned with ProductEmbeddingTextBuilder output.
+    /// Format: "width: 8 in | height: 8 in | length: 16 in" or "diameter: 0.625 in | size: #5"
     /// </summary>
     public string ToEmbeddingFormat()
     {
-        var parts = new List<string>();
+        if (Specs.Count == 0)
+            return string.Empty;
 
-        if (WidthInches.HasValue && HeightInches.HasValue && LengthInches.HasValue)
-        {
-            parts.Add($"{WidthInches}x{HeightInches}x{LengthInches}in");
-        }
-        else if (WidthInches.HasValue && HeightInches.HasValue)
-        {
-            parts.Add($"{WidthInches}x{HeightInches}in");
-        }
-        else
-        {
-            if (WidthInches.HasValue) parts.Add($"{WidthInches}in wide");
-            if (HeightInches.HasValue) parts.Add($"{HeightInches}in high");
-            if (LengthInches.HasValue) parts.Add($"{LengthInches}in long");
-        }
-
-        if (ThicknessInches.HasValue) parts.Add($"{ThicknessInches}in thick");
-        if (DiameterInches.HasValue) parts.Add($"{DiameterInches}in diameter");
-
-        return string.Join(" ", parts);
+        var parts = Specs.Select(kv => $"{kv.Key}: {kv.Value}");
+        return string.Join(" | ", parts);
     }
 }
 

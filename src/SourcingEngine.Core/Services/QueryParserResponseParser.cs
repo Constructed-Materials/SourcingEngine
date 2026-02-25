@@ -78,19 +78,23 @@ public static class QueryParserResponseParser
                 };
             }
 
+            // Map the generic technical_specs dictionary
+            var technicalSpecs = new TechnicalSpecs();
+            if (parsed.TechnicalSpecs != null)
+            {
+                foreach (var kv in parsed.TechnicalSpecs)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Value))
+                        technicalSpecs.Specs[kv.Key] = kv.Value;
+                }
+            }
+
             return new ParsedBomQuery
             {
                 Success = true,
                 OriginalInput = originalInput,
                 MaterialFamily = parsed.MaterialFamily,
-                TechnicalSpecs = new TechnicalSpecs
-                {
-                    WidthInches = parsed.WidthInches,
-                    HeightInches = parsed.HeightInches,
-                    LengthInches = parsed.LengthInches,
-                    ThicknessInches = parsed.ThicknessInches,
-                    DiameterInches = parsed.DiameterInches
-                },
+                TechnicalSpecs = technicalSpecs,
                 Attributes = parsed.Attributes ?? new Dictionary<string, string>(),
                 SearchQuery = parsed.SearchQuery ?? originalInput,
                 Confidence = parsed.Confidence ?? 0.5f
@@ -119,20 +123,8 @@ public class LlmParseResult
     [JsonPropertyName("material_family")]
     public string? MaterialFamily { get; set; }
 
-    [JsonPropertyName("width_inches")]
-    public double? WidthInches { get; set; }
-
-    [JsonPropertyName("height_inches")]
-    public double? HeightInches { get; set; }
-
-    [JsonPropertyName("length_inches")]
-    public double? LengthInches { get; set; }
-
-    [JsonPropertyName("thickness_inches")]
-    public double? ThicknessInches { get; set; }
-
-    [JsonPropertyName("diameter_inches")]
-    public double? DiameterInches { get; set; }
+    [JsonPropertyName("technical_specs")]
+    public Dictionary<string, string>? TechnicalSpecs { get; set; }
 
     [JsonPropertyName("attributes")]
     public Dictionary<string, string>? Attributes { get; set; }

@@ -3,52 +3,25 @@ using SourcingEngine.Core.Models;
 namespace SourcingEngine.Core.Services;
 
 /// <summary>
-/// Search mode for semantic vs keyword search
-/// </summary>
-public enum SemanticSearchMode
-{
-    /// <summary>
-    /// Semantic search disabled, use only keyword/family-based search
-    /// </summary>
-    Off,
-
-    /// <summary>
-    /// Family-first: Find family via semantic search, then search products by family
-    /// (original hybrid approach)
-    /// </summary>
-    FamilyFirst,
-
-    /// <summary>
-    /// Product-first: Search products directly by semantic similarity
-    /// (bypasses family resolution, uses product embeddings)
-    /// </summary>
-    ProductFirst,
-
-    /// <summary>
-    /// Hybrid: Run both FamilyFirst and ProductFirst in parallel and fuse results
-    /// </summary>
-    Hybrid
-}
-
-/// <summary>
-/// Main search orchestrator that chains all search steps
+/// Main search orchestrator that processes BOM extraction results
+/// and matches each line item to products.
 /// </summary>
 public interface ISearchOrchestrator
 {
     /// <summary>
-    /// Execute full search pipeline for a BOM item
+    /// Execute full search pipeline for all BOM items in a sourcing request.
     /// </summary>
-    /// <param name="bomText">Raw BOM line item text</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Complete search result with matched products</returns>
-    Task<SearchResult> SearchAsync(string bomText, CancellationToken cancellationToken = default);
+    /// <param name="request">Sourcing request containing extraction results.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Aggregate result with per-item product matches.</returns>
+    Task<SourcingResult> SearchAsync(SourcingRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Execute search with explicit semantic search mode
+    /// Convenience overload: search for a single BOM spec text.
+    /// Internally wraps in a 1-item <see cref="SourcingRequest"/>.
     /// </summary>
-    /// <param name="bomText">Raw BOM line item text</param>
-    /// <param name="mode">Semantic search mode to use</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Complete search result with matched products</returns>
-    Task<SearchResult> SearchAsync(string bomText, SemanticSearchMode mode, CancellationToken cancellationToken = default);
+    /// <param name="bomText">Raw BOM line item text (used as the spec).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Search result for the single item.</returns>
+    Task<SearchResult> SearchAsync(string bomText, CancellationToken cancellationToken = default);
 }

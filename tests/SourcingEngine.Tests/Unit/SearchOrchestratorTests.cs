@@ -1,98 +1,66 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Moq;
-using SourcingEngine.Core.Configuration;
+using SourcingEngine.Common.Models;
 using SourcingEngine.Core.Models;
-using SourcingEngine.Core.Repositories;
 using SourcingEngine.Core.Services;
 using Xunit;
 
 namespace SourcingEngine.Tests.Unit;
 
 /// <summary>
-/// Unit tests for the refactored SearchOrchestrator (thin router).
-/// Validates input validation, strategy selection, and result assembly.
+/// Unit tests for the refactored SearchOrchestrator.
+/// Validates input validation, batch processing, and result assembly.
 /// </summary>
 public class SearchOrchestratorTests
 {
-    private readonly Mock<IInputNormalizer> _normalizerMock;
-    private readonly Mock<IMaterialFamilyRepository> _familyRepoMock;
-    private readonly Mock<ISearchStrategy> _familyFirstMock;
-    private readonly Mock<ISearchStrategy> _productFirstMock;
-    private readonly Mock<ISearchStrategy> _hybridMock;
+    private readonly Mock<ISearchStrategy> _strategyMock;
     private readonly Mock<ILogger<SearchOrchestrator>> _loggerMock;
-    private readonly SemanticSearchSettings _settings;
 
     public SearchOrchestratorTests()
     {
-        _normalizerMock = new Mock<IInputNormalizer>();
-        _familyRepoMock = new Mock<IMaterialFamilyRepository>();
-        _familyFirstMock = new Mock<ISearchStrategy>();
-        _productFirstMock = new Mock<ISearchStrategy>();
-        _hybridMock = new Mock<ISearchStrategy>();
+        _strategyMock = new Mock<ISearchStrategy>();
         _loggerMock = new Mock<ILogger<SearchOrchestrator>>();
 
-        _settings = new SemanticSearchSettings
-        {
-            Enabled = true,
-            DefaultMode = SemanticSearchMode.FamilyFirst
-        };
-
-        _familyFirstMock.SetupGet(s => s.Mode).Returns(SemanticSearchMode.FamilyFirst);
-        _productFirstMock.SetupGet(s => s.Mode).Returns(SemanticSearchMode.ProductFirst);
-        _hybridMock.SetupGet(s => s.Mode).Returns(SemanticSearchMode.Hybrid);
-
-        _normalizerMock.Setup(n => n.Normalize(It.IsAny<string>()))
-            .Returns<string>(text => new BomItem
-            {
-                RawText = text,
-                Keywords = [text],
-                Synonyms = [text],
-                SizeVariants = []
-            });
-
-        // Default: family repo returns nothing (safe default)
-        _familyRepoMock.Setup(r => r.FindByKeywordsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<MaterialFamily>());
+        // Default: strategy returns empty result
+        _strategyMock.Setup(s => s.ExecuteAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SearchStrategyResult());
     }
 
-    private SearchOrchestrator CreateOrchestrator(params ISearchStrategy[] strategies)
+    private SearchOrchestrator CreateOrchestrator()
     {
         return new SearchOrchestrator(
-            _normalizerMock.Object,
-            _familyRepoMock.Object,
-            strategies,
-            Options.Create(_settings),
+            _strategyMock.Object,
             _loggerMock.Object);
     }
 
-    // ── Input validation ───────────────────────────────────────────
+    // ── Input validation (string overload) ─────────────────────────
 
     [Fact]
     public async Task SearchAsync_NullInput_ThrowsArgumentException()
     {
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
-        await Assert.ThrowsAsync<ArgumentException>(() => sut.SearchAsync(null!));
+        var sut = CreateOrchestrator();
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.SearchAsync((string)null!));
     }
 
     [Fact]
     public async Task SearchAsync_EmptyInput_ThrowsArgumentException()
     {
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
+        var sut = CreateOrchestrator();
         await Assert.ThrowsAsync<ArgumentException>(() => sut.SearchAsync(""));
     }
 
     [Fact]
     public async Task SearchAsync_WhitespaceInput_ThrowsArgumentException()
     {
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
+        var sut = CreateOrchestrator();
         await Assert.ThrowsAsync<ArgumentException>(() => sut.SearchAsync("   "));
     }
 
     [Fact]
     public async Task SearchAsync_ExceedsMaxLength_ThrowsArgumentException()
     {
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
+        var sut = CreateOrchestrator();
         var longInput = new string('x', 501);
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => sut.SearchAsync(longInput));
         Assert.Contains("500", ex.Message);
@@ -101,105 +69,99 @@ public class SearchOrchestratorTests
     [Fact]
     public async Task SearchAsync_ExactlyMaxLength_DoesNotThrow()
     {
-        SetupStrategyReturnsEmpty(_familyFirstMock);
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
+        var sut = CreateOrchestrator();
         var maxInput = new string('x', 500);
         var result = await sut.SearchAsync(maxInput);
         Assert.NotNull(result);
     }
 
-    // ── Strategy selection ─────────────────────────────────────────
+    // ── Input validation (SourcingRequest overload) ────────────────
 
     [Fact]
-    public async Task SearchAsync_FamilyFirstMode_UsesFamilyFirstStrategy()
+    public async Task SearchAsync_NullRequest_ThrowsArgumentNullException()
     {
-        SetupStrategyReturnsEmpty(_familyFirstMock);
-        var sut = CreateOrchestrator(_familyFirstMock.Object, _productFirstMock.Object);
-
-        await sut.SearchAsync("cmu block", SemanticSearchMode.FamilyFirst);
-
-        _familyFirstMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Once);
-        _productFirstMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Never);
+        var sut = CreateOrchestrator();
+        await Assert.ThrowsAsync<ArgumentNullException>(() => sut.SearchAsync((SourcingRequest)null!));
     }
 
     [Fact]
-    public async Task SearchAsync_ProductFirstMode_UsesProductFirstStrategy()
+    public async Task SearchAsync_NullExtractionResult_ThrowsArgumentNullException()
     {
-        SetupStrategyReturnsEmpty(_productFirstMock);
-        var sut = CreateOrchestrator(_familyFirstMock.Object, _productFirstMock.Object);
+        var sut = CreateOrchestrator();
+        var request = new SourcingRequest { ExtractionResult = null! };
+        await Assert.ThrowsAsync<ArgumentNullException>(() => sut.SearchAsync(request));
+    }
 
-        await sut.SearchAsync("curtain wall", SemanticSearchMode.ProductFirst);
+    // ── Batch processing ───────────────────────────────────────────
 
-        _productFirstMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Once);
+    [Fact]
+    public async Task SearchAsync_IteratesAllBomItems()
+    {
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "cmu block", Spec = "8 inch cmu block" },
+            new BomLineItem { BomItem = "rebar", Spec = "#4 rebar" },
+            new BomLineItem { BomItem = "stucco", Spec = "5/8 stucco" });
+
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
+
+        Assert.Equal(3, result.Items.Count);
+        _strategyMock.Verify(s => s.ExecuteAsync(
+            It.IsAny<BomLineItem>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
     [Fact]
-    public async Task SearchAsync_HybridMode_UsesHybridStrategy()
+    public async Task SearchAsync_PropagatesMetadata()
     {
-        SetupStrategyReturnsEmpty(_hybridMock);
-        var sut = CreateOrchestrator(_familyFirstMock.Object, _productFirstMock.Object, _hybridMock.Object);
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "cmu", Spec = "8 inch cmu", Quantity = 100 });
+        request.ExtractionResult.TraceId = "trace-123";
+        request.ExtractionResult.ProjectId = "proj-456";
+        request.ExtractionResult.SourceFile = "estimate.csv";
 
-        await sut.SearchAsync("floor joist", SemanticSearchMode.Hybrid);
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
 
-        _hybridMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("trace-123", result.TraceId);
+        Assert.Equal("proj-456", result.ProjectId);
+        Assert.Equal("estimate.csv", result.SourceFile);
     }
 
     [Fact]
-    public async Task SearchAsync_UnavailableMode_FallsBackToFamilyFirst()
+    public async Task SearchAsync_CapturesItemQuantity()
     {
-        SetupStrategyReturnsEmpty(_familyFirstMock);
-        // Only register FamilyFirst — no ProductFirst available
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "cmu", Spec = "8 inch cmu block", Quantity = 250 });
 
-        await sut.SearchAsync("cmu block", SemanticSearchMode.ProductFirst);
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
 
-        // Should fall back to FamilyFirst
-        _familyFirstMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(250, result.Items[0].Quantity);
     }
 
-    [Fact]
-    public async Task SearchAsync_OffMode_FallsBackToFamilyFirst()
-    {
-        SetupStrategyReturnsEmpty(_familyFirstMock);
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
-
-        // Off is not registered as a strategy, should fall back to FamilyFirst
-        await sut.SearchAsync("block", SemanticSearchMode.Off);
-
-        _familyFirstMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
+    // ── Error handling ─────────────────────────────────────────────
 
     [Fact]
-    public async Task SearchAsync_DefaultMode_UsesSettingsDefaultMode()
+    public async Task SearchAsync_StrategyFailsForOneItem_ContinuesOthers()
     {
-        _settings.DefaultMode = SemanticSearchMode.ProductFirst;
-        SetupStrategyReturnsEmpty(_productFirstMock);
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "good1", Spec = "first item" },
+            new BomLineItem { BomItem = "bad", Spec = "failing item" },
+            new BomLineItem { BomItem = "good2", Spec = "third item" });
 
-        var sut = CreateOrchestrator(_familyFirstMock.Object, _productFirstMock.Object);
+        _strategyMock.Setup(s => s.ExecuteAsync(
+                It.Is<BomLineItem>(i => i.BomItem == "bad"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("DB error"));
 
-        await sut.SearchAsync("cmu block"); // No explicit mode
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
 
-        _productFirstMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task SearchAsync_SemanticDisabled_SelectsOff()
-    {
-        _settings.Enabled = false;
-        SetupStrategyReturnsEmpty(_familyFirstMock);
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
-
-        await sut.SearchAsync("block"); // Should use Off → falls back to FamilyFirst
-
-        _familyFirstMock.Verify(s => s.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()), Times.Once);
+        // All 3 items should still be present
+        Assert.Equal(3, result.Items.Count);
+        // The failing item should have an empty result with warning
+        var badItem = result.Items.First(i => i.BomItemName == "bad");
+        Assert.Contains("Search failed", badItem.SearchResult.Warnings[0]);
+        Assert.Contains("DB error", result.Warnings.First(w => w.Contains("bad")));
     }
 
     // ── Result assembly ────────────────────────────────────────────
@@ -211,8 +173,8 @@ public class SearchOrchestratorTests
         {
             new() { ProductId = Guid.NewGuid(), Vendor = "Acme", ModelName = "W100" }
         };
-        _familyFirstMock.Setup(s => s.ExecuteAsync(
-                It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()))
+        _strategyMock.Setup(s => s.ExecuteAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SearchStrategyResult
             {
                 Matches = matches,
@@ -221,12 +183,8 @@ public class SearchOrchestratorTests
                 CsiCode = "042200"
             });
 
-        _familyRepoMock.Setup(r => r.FindByKeywordsAsync(
-                It.Is<IEnumerable<string>>(k => k.Contains("cmu_blocks")), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new MaterialFamily { FamilyLabel = "cmu_blocks", FamilyName = "CMU Blocks" }]);
-
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
-        var result = await sut.SearchAsync("8 inch cmu", SemanticSearchMode.FamilyFirst);
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync("8 inch cmu");
 
         Assert.Equal("8 inch cmu", result.Query);
         Assert.Equal("cmu_blocks", result.FamilyLabel);
@@ -239,20 +197,49 @@ public class SearchOrchestratorTests
     [Fact]
     public async Task SearchAsync_TrimsInput()
     {
-        SetupStrategyReturnsEmpty(_familyFirstMock);
-        var sut = CreateOrchestrator(_familyFirstMock.Object);
-
-        var result = await sut.SearchAsync("  cmu block  ", SemanticSearchMode.FamilyFirst);
-
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync("  cmu block  ");
         Assert.Equal("cmu block", result.Query);
+    }
+
+    [Fact]
+    public async Task SearchAsync_SourcingResult_CalculatesTotalMatches()
+    {
+        _strategyMock.Setup(s => s.ExecuteAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SearchStrategyResult
+            {
+                Matches = [
+                    new ProductMatch { Vendor = "V1", ModelName = "M1" },
+                    new ProductMatch { Vendor = "V2", ModelName = "M2" }
+                ]
+            });
+
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "item1", Spec = "spec1" },
+            new BomLineItem { BomItem = "item2", Spec = "spec2" });
+
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
+
+        Assert.Equal(4, result.TotalMatches); // 2 matches × 2 items
+        Assert.True(result.TotalExecutionTimeMs >= 0);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────
 
-    private static void SetupStrategyReturnsEmpty(Mock<ISearchStrategy> mock)
+    private static SourcingRequest MakeRequest(params BomLineItem[] items)
     {
-        mock.Setup(s => s.ExecuteAsync(
-                It.IsAny<string>(), It.IsAny<BomItem>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SearchStrategyResult());
+        return new SourcingRequest
+        {
+            ExtractionResult = new ExtractionResultMessage
+            {
+                TraceId = "test-trace",
+                ProjectId = "test-project",
+                SourceFile = "test.csv",
+                Items = items.ToList(),
+                Warnings = new List<string>()
+            }
+        };
     }
 }

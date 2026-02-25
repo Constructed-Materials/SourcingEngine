@@ -1,10 +1,10 @@
 using System.Text.Json.Serialization;
 
-namespace SourcingEngine.BomExtraction.Models;
+namespace SourcingEngine.Common.Models;
 
 /// <summary>
 /// A single structured line item extracted from a BOM document.
-/// Maps directly to the Python BomLineItem for downstream SourcingEngine compatibility.
+/// Shared contract between BomExtraction and SourcingEngine pipelines.
 /// </summary>
 public class BomLineItem
 {

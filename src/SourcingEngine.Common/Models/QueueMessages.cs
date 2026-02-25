@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
-using SourcingEngine.BomExtraction.Models;
 
-namespace SourcingEngine.BomExtraction.Lambda.Models;
+namespace SourcingEngine.Common.Models;
 
 /// <summary>
 /// Reference to a single BOM file in an extraction request.
@@ -34,7 +33,7 @@ public class ExtractionRequestMessage
 
 /// <summary>
 /// Result message published per-file to the bom-extraction-result-queue.
-/// Matches the Python ExtractionResultMessage contract.
+/// Shared contract between BomExtraction and SourcingEngine pipelines.
 /// </summary>
 public class ExtractionResultMessage
 {

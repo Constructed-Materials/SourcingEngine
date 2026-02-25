@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using SourcingEngine.BomExtraction.Lambda.Configuration;
-using SourcingEngine.BomExtraction.Lambda.Models;
+using SourcingEngine.Common.Models;
 
 namespace SourcingEngine.BomExtraction.Lambda.Services;
 

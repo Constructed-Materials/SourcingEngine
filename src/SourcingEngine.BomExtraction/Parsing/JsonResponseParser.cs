@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
-using SourcingEngine.BomExtraction.Models;
+using SourcingEngine.Common.Models;
 
 namespace SourcingEngine.BomExtraction.Parsing;
 

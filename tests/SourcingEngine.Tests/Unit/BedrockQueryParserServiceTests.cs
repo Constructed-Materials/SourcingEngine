@@ -28,7 +28,7 @@ public class BedrockQueryParserServiceTests : IDisposable
         {
             Enabled = true,
             Region = "us-east-1",
-            ParsingModelId = "anthropic.claude-3-5-haiku-20241022-v1:0",
+            ParsingModelId = "us.amazon.nova-lite-v1:0",
             ParsingMaxTokens = 500,
             ParsingTemperature = 0.1f
         });
@@ -46,7 +46,7 @@ public class BedrockQueryParserServiceTests : IDisposable
     public async Task ParseAsync_WithValidInput_ReturnsParsedResult()
     {
         // Arrange
-        var llmJson = @"{""material_family"":""cmu"",""width_inches"":8,""height_inches"":8,""length_inches"":16,""thickness_inches"":null,""diameter_inches"":null,""attributes"":{""color"":""gray""},""search_query"":""8 inch 20 cm 200 mm concrete masonry unit CMU gray"",""confidence"":0.95}";
+        var llmJson = @"{""material_family"":""cmu"",""technical_specs"":{""width"":""8 in"",""height"":""8 in"",""length"":""16 in""},""attributes"":{""color"":""gray""},""search_query"":""8 inch 200 mm concrete masonry unit CMU gray"",""confidence"":0.95}";
         SetupConverseResponse(llmJson);
 
         // Act
@@ -55,9 +55,9 @@ public class BedrockQueryParserServiceTests : IDisposable
         // Assert
         Assert.True(result.Success);
         Assert.Equal("cmu", result.MaterialFamily);
-        Assert.Equal(8, result.TechnicalSpecs.WidthInches);
-        Assert.Equal(8, result.TechnicalSpecs.HeightInches);
-        Assert.Equal(16, result.TechnicalSpecs.LengthInches);
+        Assert.Equal("8 in", result.TechnicalSpecs.Specs["width"]);
+        Assert.Equal("8 in", result.TechnicalSpecs.Specs["height"]);
+        Assert.Equal("16 in", result.TechnicalSpecs.Specs["length"]);
         Assert.Contains("gray", result.Attributes.Values);
         Assert.Contains("CMU", result.SearchQuery);
         Assert.Equal(0.95f, result.Confidence);
@@ -80,7 +80,7 @@ public class BedrockQueryParserServiceTests : IDisposable
 
         // Assert
         Assert.NotNull(capturedRequest);
-        Assert.Equal("anthropic.claude-3-5-haiku-20241022-v1:0", capturedRequest!.ModelId);
+        Assert.Equal("us.amazon.nova-lite-v1:0", capturedRequest!.ModelId);
 
         // System message should contain the shared prompt
         Assert.Single(capturedRequest.System);
@@ -184,7 +184,7 @@ public class BedrockQueryParserServiceTests : IDisposable
     {
         // Arrange — LLM wraps JSON with explanation text
         var response = @"Here is the parsed result:
-{""material_family"":""lumber"",""width_inches"":1.5,""height_inches"":3.5,""length_inches"":96,""attributes"":{""nominal"":""2x4""},""search_query"":""2x4 lumber wood timber"",""confidence"":0.9}
+{""material_family"":""lumber"",""technical_specs"":{""width"":""1.5 in"",""height"":""3.5 in"",""length"":""96 in""},""attributes"":{""nominal"":""2x4""},""search_query"":""2x4 lumber wood timber"",""confidence"":0.9}
 This represents a standard 2x4 board.";
         SetupConverseResponse(response);
 
@@ -194,7 +194,7 @@ This represents a standard 2x4 board.";
         // Assert
         Assert.True(result.Success);
         Assert.Equal("lumber", result.MaterialFamily);
-        Assert.Equal(1.5, result.TechnicalSpecs.WidthInches);
+        Assert.Equal("1.5 in", result.TechnicalSpecs.Specs["width"]);
     }
 
     [Fact]

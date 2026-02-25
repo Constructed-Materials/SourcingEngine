@@ -24,8 +24,8 @@ public class SemanticProductRepository : ISemanticProductRepository
 
     public async Task<List<SemanticProductMatch>> SearchByEmbeddingAsync(
         float[] queryEmbedding,
-        float matchThreshold = 0.5f,
-        int matchCount = 10,
+        float matchThreshold = 0.3f,
+        int matchCount = 20,
         CancellationToken cancellationToken = default)
     {
         return await SearchByEmbeddingAsync(queryEmbedding, null, matchThreshold, matchCount, cancellationToken);
@@ -34,8 +34,8 @@ public class SemanticProductRepository : ISemanticProductRepository
     public async Task<List<SemanticProductMatch>> SearchByEmbeddingAsync(
         float[] queryEmbedding,
         string? familyLabel,
-        float matchThreshold = 0.5f,
-        int matchCount = 10,
+        float matchThreshold = 0.3f,
+        int matchCount = 20,
         CancellationToken cancellationToken = default)
     {
         if (queryEmbedding == null || queryEmbedding.Length == 0)

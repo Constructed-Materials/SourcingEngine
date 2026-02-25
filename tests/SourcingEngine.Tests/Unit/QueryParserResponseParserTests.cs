@@ -12,7 +12,7 @@ public class QueryParserResponseParserTests
     public void Parse_ValidJson_ReturnsSuccessfulResult()
     {
         // Arrange
-        var json = @"{""material_family"":""cmu"",""width_inches"":8,""height_inches"":8,""length_inches"":16,""attributes"":{""color"":""gray""},""search_query"":""8 inch CMU gray"",""confidence"":0.95}";
+        var json = @"{""material_family"":""cmu"",""technical_specs"":{""width"":""8 in"",""height"":""8 in"",""length"":""16 in""},""attributes"":{""color"":""gray""},""search_query"":""8 inch CMU gray"",""confidence"":0.95}";
 
         // Act
         var result = QueryParserResponseParser.Parse(json, "8 inch cmu gray");
@@ -20,9 +20,9 @@ public class QueryParserResponseParserTests
         // Assert
         Assert.True(result.Success);
         Assert.Equal("cmu", result.MaterialFamily);
-        Assert.Equal(8, result.TechnicalSpecs.WidthInches);
-        Assert.Equal(8, result.TechnicalSpecs.HeightInches);
-        Assert.Equal(16, result.TechnicalSpecs.LengthInches);
+        Assert.Equal("8 in", result.TechnicalSpecs.Specs["width"]);
+        Assert.Equal("8 in", result.TechnicalSpecs.Specs["height"]);
+        Assert.Equal("16 in", result.TechnicalSpecs.Specs["length"]);
         Assert.Equal("gray", result.Attributes["color"]);
         Assert.Equal("8 inch CMU gray", result.SearchQuery);
         Assert.Equal(0.95f, result.Confidence);
@@ -107,30 +107,51 @@ Done.";
     }
 
     [Fact]
-    public void Parse_AllDimensions_ExtractsCorrectly()
+    public void Parse_MultipleSpecs_ExtractsCorrectly()
     {
-        var json = @"{""material_family"":""cmu"",""width_inches"":8,""height_inches"":8,""length_inches"":16,""thickness_inches"":2.5,""diameter_inches"":null,""search_query"":""CMU"",""confidence"":0.9}";
+        var json = @"{""material_family"":""cmu"",""technical_specs"":{""width"":""8 in"",""height"":""8 in"",""length"":""16 in"",""thickness"":""2.5 in""},""search_query"":""CMU"",""confidence"":0.9}";
 
         var result = QueryParserResponseParser.Parse(json, "cmu");
 
         Assert.True(result.Success);
-        Assert.Equal(8, result.TechnicalSpecs.WidthInches);
-        Assert.Equal(8, result.TechnicalSpecs.HeightInches);
-        Assert.Equal(16, result.TechnicalSpecs.LengthInches);
-        Assert.Equal(2.5, result.TechnicalSpecs.ThicknessInches);
-        Assert.Null(result.TechnicalSpecs.DiameterInches);
+        Assert.Equal(4, result.TechnicalSpecs.Specs.Count);
+        Assert.Equal("8 in", result.TechnicalSpecs.Specs["width"]);
+        Assert.Equal("2.5 in", result.TechnicalSpecs.Specs["thickness"]);
     }
 
     [Fact]
-    public void Parse_DiameterOnly_ExtractsCorrectly()
+    public void Parse_NonDimensionSpecs_ExtractsCorrectly()
     {
-        var json = @"{""material_family"":""rebar"",""diameter_inches"":0.625,""search_query"":""rebar"",""confidence"":0.98}";
+        var json = @"{""material_family"":""window"",""technical_specs"":{""width"":""36 in"",""height"":""48 in"",""u_factor"":""0.30"",""shgc"":""0.25""},""search_query"":""window"",""confidence"":0.90}";
 
-        var result = QueryParserResponseParser.Parse(json, "#5 rebar");
+        var result = QueryParserResponseParser.Parse(json, "vinyl window");
 
         Assert.True(result.Success);
-        Assert.Equal(0.625, result.TechnicalSpecs.DiameterInches);
-        Assert.Null(result.TechnicalSpecs.WidthInches);
+        Assert.Equal("0.30", result.TechnicalSpecs.Specs["u_factor"]);
+        Assert.Equal("0.25", result.TechnicalSpecs.Specs["shgc"]);
+        Assert.Equal("36 in", result.TechnicalSpecs.Specs["width"]);
+    }
+
+    [Fact]
+    public void Parse_EmptyTechnicalSpecs_CreatesEmptyDictionary()
+    {
+        var json = @"{""material_family"":""lumber"",""technical_specs"":{},""search_query"":""lumber"",""confidence"":0.85}";
+
+        var result = QueryParserResponseParser.Parse(json, "lumber");
+
+        Assert.True(result.Success);
+        Assert.Empty(result.TechnicalSpecs.Specs);
+    }
+
+    [Fact]
+    public void Parse_MissingTechnicalSpecs_CreatesEmptyDictionary()
+    {
+        var json = @"{""material_family"":""stucco"",""search_query"":""stucco EIFS"",""confidence"":0.8}";
+
+        var result = QueryParserResponseParser.Parse(json, "stucco");
+
+        Assert.True(result.Success);
+        Assert.Empty(result.TechnicalSpecs.Specs);
     }
 
     [Fact]

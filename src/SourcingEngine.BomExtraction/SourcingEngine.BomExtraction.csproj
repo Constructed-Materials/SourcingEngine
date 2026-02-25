@@ -17,4 +17,8 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\SourcingEngine.Common\SourcingEngine.Common.csproj" />
+  </ItemGroup>
+
 </Project>

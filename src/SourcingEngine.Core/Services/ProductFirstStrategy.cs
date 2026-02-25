@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SourcingEngine.Common.Models;
 using SourcingEngine.Core.Configuration;
 using SourcingEngine.Core.Models;
 using SourcingEngine.Core.Repositories;
@@ -7,54 +8,69 @@ using SourcingEngine.Core.Repositories;
 namespace SourcingEngine.Core.Services;
 
 /// <summary>
-/// Product-first search: directly search products by semantic embedding similarity,
-/// then enrich matches with vendor-specific data.
-/// Bypasses family resolution, using product embeddings instead.
+/// Product-first search: parse the BOM item via LLM, build a structured query
+/// embedding aligned with the product embedding format, and search products
+/// directly by semantic similarity.
 /// </summary>
 public class ProductFirstStrategy : ISearchStrategy
 {
     private readonly ISemanticProductRepository _semanticProductRepository;
     private readonly IProductEnrichedRepository _productEnrichedRepository;
-    private readonly IMaterialFamilyRepository _materialFamilyRepository;
     private readonly IEmbeddingService _embeddingService;
-    private readonly IQueryParserService? _queryParserService;
+    private readonly IQueryParserService _queryParserService;
+    private readonly IQueryEmbeddingTextBuilder _queryEmbeddingTextBuilder;
     private readonly SemanticSearchSettings _settings;
     private readonly ILogger<ProductFirstStrategy> _logger;
-
-    public SemanticSearchMode Mode => SemanticSearchMode.ProductFirst;
 
     public ProductFirstStrategy(
         ISemanticProductRepository semanticProductRepository,
         IProductEnrichedRepository productEnrichedRepository,
-        IMaterialFamilyRepository materialFamilyRepository,
         IEmbeddingService embeddingService,
+        IQueryParserService queryParserService,
+        IQueryEmbeddingTextBuilder queryEmbeddingTextBuilder,
         IOptions<SemanticSearchSettings> settings,
-        ILogger<ProductFirstStrategy> logger,
-        IQueryParserService? queryParserService = null)
+        ILogger<ProductFirstStrategy> logger)
     {
         _semanticProductRepository = semanticProductRepository;
         _productEnrichedRepository = productEnrichedRepository;
-        _materialFamilyRepository = materialFamilyRepository;
         _embeddingService = embeddingService;
         _queryParserService = queryParserService;
+        _queryEmbeddingTextBuilder = queryEmbeddingTextBuilder;
         _settings = settings.Value;
         _logger = logger;
     }
 
     public async Task<SearchStrategyResult> ExecuteAsync(
-        string bomText, BomItem bomItem, CancellationToken cancellationToken)
+        BomLineItem item, CancellationToken cancellationToken)
     {
         var warnings = new List<string>();
 
         try
         {
-            // Step 1: LLM query enrichment (optional)
-            var textToEmbed = await EnrichQueryAsync(bomText, cancellationToken);
+            // Step 1: LLM query parsing (mandatory) — extract family, dimensions, attributes
+            var searchText = item.Spec;
+            if (string.IsNullOrWhiteSpace(searchText))
+                searchText = item.BomItem;
 
-            // Step 2: Generate embedding
+            var parsedQuery = await ParseQueryAsync(searchText, cancellationToken);
+            if (!parsedQuery.Success)
+            {
+                warnings.Add($"LLM parsing failed: {parsedQuery.ErrorMessage}. Using raw spec text.");
+            }
+
+            // Step 2: Build structured embedding text aligned with product format
+            var textToEmbed = parsedQuery.Success
+                ? _queryEmbeddingTextBuilder.BuildQueryEmbeddingText(item, parsedQuery)
+                : searchText;
+
+            _logger.LogInformation(
+                "Embedding text for '{BomItem}': {EmbeddingText}",
+                item.BomItem, EmbeddingUtilities.TruncateForLog(textToEmbed));
+
+            // Step 3: Generate embedding
             var embedding = await _embeddingService.GenerateEmbeddingAsync(textToEmbed, cancellationToken);
 
-            // Step 3: Semantic search
+            // Step 4: Semantic search
             var semanticMatches = await _semanticProductRepository.SearchByEmbeddingAsync(
                 embedding,
                 _settings.SimilarityThreshold,
@@ -64,18 +80,18 @@ public class ProductFirstStrategy : ISearchStrategy
             _logger.LogInformation("Semantic search found {Count} products above threshold {Threshold}",
                 semanticMatches.Count, _settings.SimilarityThreshold);
 
-            // Step 4: Derive family label from most common result
+            // Step 5: Derive family label from most common result
             var familyLabel = semanticMatches
                 .Where(sm => !string.IsNullOrWhiteSpace(sm.FamilyLabel))
                 .GroupBy(sm => sm.FamilyLabel)
                 .OrderByDescending(g => g.Count())
                 .FirstOrDefault()?.Key;
 
-            // Step 5: Derive CSI code
+            // Step 6: Derive CSI code
             var csiCode = semanticMatches
                 .FirstOrDefault(sm => !string.IsNullOrWhiteSpace(sm.CsiCode))?.CsiCode;
 
-            // Step 6: Enrich with vendor-specific data
+            // Step 7: Enrich with vendor-specific data
             var productIds = semanticMatches.Select(sm => sm.ProductId).ToList();
             var enrichedData = await _productEnrichedRepository.GetEnrichedDataAsync(productIds, cancellationToken);
             var enrichedLookup = enrichedData.ToDictionary(e => e.ProductId, e => e);
@@ -83,7 +99,7 @@ public class ProductFirstStrategy : ISearchStrategy
             _logger.LogDebug("Enriched {EnrichedCount}/{TotalCount} semantic matches with vendor data",
                 enrichedData.Count, semanticMatches.Count);
 
-            // Step 7: Convert to ProductMatch
+            // Step 8: Convert to ProductMatch
             var matches = semanticMatches.Select(sm =>
             {
                 enrichedLookup.TryGetValue(sm.ProductId, out var enriched);
@@ -113,39 +129,40 @@ public class ProductFirstStrategy : ISearchStrategy
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Semantic product search failed");
+            _logger.LogWarning(ex, "Semantic product search failed for '{BomItem}'", item.BomItem);
             warnings.Add($"Semantic search failed: {ex.Message}");
             throw;
         }
     }
 
     /// <summary>
-    /// Use the LLM query parser (if available) to enrich the raw BOM text
-    /// before generating an embedding.
+    /// Parse the BOM text via LLM to extract structured material information.
+    /// Falls back gracefully on failure.
     /// </summary>
-    private async Task<string> EnrichQueryAsync(string bomText, CancellationToken cancellationToken)
+    private async Task<ParsedBomQuery> ParseQueryAsync(string bomText, CancellationToken cancellationToken)
     {
-        if (_queryParserService == null)
-            return bomText;
-
         try
         {
             var parsed = await _queryParserService.ParseAsync(bomText, cancellationToken);
-            if (parsed.Success && !string.IsNullOrWhiteSpace(parsed.SearchQuery))
+            if (parsed.Success)
             {
                 _logger.LogInformation(
-                    "LLM parsed '{OriginalText}' → '{EnrichedQuery}' (confidence: {Confidence:F2})",
-                    bomText, parsed.SearchQuery, parsed.Confidence);
-                return parsed.SearchQuery;
+                    "LLM parsed '{OriginalText}' → family='{Family}', specs='{Specs}' (confidence: {Confidence:F2})",
+                    bomText, parsed.MaterialFamily, parsed.TechnicalSpecs.ToEmbeddingFormat(), parsed.Confidence);
+    
             }
-
-            _logger.LogDebug("Query parser returned no enriched query, using raw text");
+            return parsed;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Query parsing failed, falling back to raw BOM text");
+            _logger.LogWarning(ex, "Query parsing failed for '{BomText}'", bomText);
+            return new ParsedBomQuery
+            {
+                OriginalInput = bomText,
+                SearchQuery = bomText,
+                Success = false,
+                ErrorMessage = ex.Message
+            };
         }
-
-        return bomText;
     }
 }

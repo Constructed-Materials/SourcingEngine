@@ -5,10 +5,10 @@ using Amazon.Lambda.MQEvents;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SourcingEngine.BomExtraction.Lambda.Configuration;
-using SourcingEngine.BomExtraction.Lambda.Models;
 using SourcingEngine.BomExtraction.Lambda.Services;
-using SourcingEngine.BomExtraction.Models;
 using SourcingEngine.BomExtraction.Services;
+using SourcingEngine.Common.Models;
+using ExtractionResult = SourcingEngine.BomExtraction.Models.ExtractionResult;
 
 namespace SourcingEngine.BomExtraction.Lambda.Tests;
 

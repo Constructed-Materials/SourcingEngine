@@ -10,10 +10,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SourcingEngine.BomExtraction.Configuration;
 using SourcingEngine.BomExtraction.Lambda.Configuration;
-using SourcingEngine.BomExtraction.Lambda.Models;
 using SourcingEngine.BomExtraction.Lambda.Services;
 using SourcingEngine.BomExtraction.Parsing;
 using SourcingEngine.BomExtraction.Services;
+using SourcingEngine.Common.Models;
 
 // Assembly attribute to tell Lambda about the serializer
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]

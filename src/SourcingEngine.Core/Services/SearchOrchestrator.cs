@@ -1,55 +1,108 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using SourcingEngine.Core.Configuration;
+using SourcingEngine.Common.Models;
 using SourcingEngine.Core.Models;
-using SourcingEngine.Core.Repositories;
 
 namespace SourcingEngine.Core.Services;
 
 /// <summary>
-/// Thin orchestrator that validates input, normalizes the BOM text,
-/// selects the appropriate <see cref="ISearchStrategy"/>, and assembles
-/// the final <see cref="SearchResult"/>.
-/// All search logic lives in the strategy implementations.
+/// Orchestrator that accepts full BOM extraction results, iterates over each
+/// BOM line item, invokes the <see cref="ISearchStrategy"/> for product search,
+/// and aggregates into a <see cref="SourcingResult"/>.
 /// </summary>
 public class SearchOrchestrator : ISearchOrchestrator
 {
-    private readonly IInputNormalizer _inputNormalizer;
-    private readonly IMaterialFamilyRepository _materialFamilyRepository;
-    private readonly IReadOnlyDictionary<SemanticSearchMode, ISearchStrategy> _strategies;
-    private readonly SemanticSearchSettings _semanticSettings;
+    private readonly ISearchStrategy _strategy;
     private readonly ILogger<SearchOrchestrator> _logger;
 
     /// <summary>
-    /// Maximum allowed length for search input text.
+    /// Maximum allowed length for single-item search input text.
     /// </summary>
     private const int MaxInputLength = 500;
 
     public SearchOrchestrator(
-        IInputNormalizer inputNormalizer,
-        IMaterialFamilyRepository materialFamilyRepository,
-        IEnumerable<ISearchStrategy> strategies,
-        IOptions<SemanticSearchSettings> semanticSettings,
+        ISearchStrategy strategy,
         ILogger<SearchOrchestrator> logger)
     {
-        _inputNormalizer = inputNormalizer;
-        _materialFamilyRepository = materialFamilyRepository;
-        _strategies = strategies.ToDictionary(s => s.Mode, s => s);
-        _semanticSettings = semanticSettings.Value;
+        _strategy = strategy;
         _logger = logger;
     }
 
-    public Task<SearchResult> SearchAsync(string bomText, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public async Task<SourcingResult> SearchAsync(SourcingRequest request, CancellationToken cancellationToken = default)
     {
-        var mode = _semanticSettings.Enabled ? _semanticSettings.DefaultMode : SemanticSearchMode.Off;
-        return SearchAsync(bomText, mode, cancellationToken);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.ExtractionResult);
+
+        var extraction = request.ExtractionResult;
+        var stopwatch = Stopwatch.StartNew();
+
+        _logger.LogInformation(
+            "Starting sourcing for trace={TraceId}, project={ProjectId}, file={SourceFile}, items={ItemCount}",
+            extraction.TraceId, extraction.ProjectId, extraction.SourceFile, extraction.Items.Count);
+
+        var itemResults = new List<BomItemSearchResult>();
+        var warnings = new List<string>(extraction.Warnings);
+
+        foreach (var item in extraction.Items)
+        {
+            try
+            {
+                var searchResult = await SearchItemAsync(item, cancellationToken);
+
+                itemResults.Add(new BomItemSearchResult
+                {
+                    BomItemName = item.BomItem,
+                    Spec = item.Spec,
+                    Quantity = item.Quantity,
+                    SearchResult = searchResult
+                });
+
+                _logger.LogInformation(
+                    "BOM item '{BomItem}' → {MatchCount} matches",
+                    item.BomItem, searchResult.MatchCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Search failed for BOM item '{BomItem}'", item.BomItem);
+                warnings.Add($"Search failed for '{item.BomItem}': {ex.Message}");
+
+                // Add empty result so the item isn't silently dropped
+                itemResults.Add(new BomItemSearchResult
+                {
+                    BomItemName = item.BomItem,
+                    Spec = item.Spec,
+                    Quantity = item.Quantity,
+                    SearchResult = new SearchResult
+                    {
+                        Query = item.Spec,
+                        Warnings = [$"Search failed: {ex.Message}"]
+                    }
+                });
+            }
+        }
+
+        stopwatch.Stop();
+
+        _logger.LogInformation(
+            "Sourcing completed in {ElapsedMs}ms: {ItemCount} items, {TotalMatches} total matches",
+            stopwatch.ElapsedMilliseconds, itemResults.Count,
+            itemResults.Sum(r => r.SearchResult.MatchCount));
+
+        return new SourcingResult
+        {
+            TraceId = extraction.TraceId,
+            ProjectId = extraction.ProjectId,
+            SourceFile = extraction.SourceFile,
+            Items = itemResults,
+            TotalExecutionTimeMs = stopwatch.ElapsedMilliseconds,
+            Warnings = warnings
+        };
     }
 
-    public async Task<SearchResult> SearchAsync(
-        string bomText, SemanticSearchMode mode, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public async Task<SearchResult> SearchAsync(string bomText, CancellationToken cancellationToken = default)
     {
-        // Input validation
         if (string.IsNullOrWhiteSpace(bomText))
             throw new ArgumentException("Search text cannot be null or empty.", nameof(bomText));
 
@@ -59,48 +112,39 @@ public class SearchOrchestrator : ISearchOrchestrator
             throw new ArgumentException(
                 $"Search text exceeds maximum length of {MaxInputLength} characters.", nameof(bomText));
 
+        // Wrap single text into a 1-item SourcingRequest
+        var item = new BomLineItem { BomItem = bomText, Spec = bomText };
+
         var stopwatch = Stopwatch.StartNew();
-        _logger.LogInformation("Starting search for: {BomText} (mode: {Mode})", bomText, mode);
+        _logger.LogInformation("Starting single-item search for: {BomText}", bomText);
 
-        // Step 1: Normalize input
-        var bomItem = _inputNormalizer.Normalize(bomText);
-        _logger.LogInformation(
-            "Extracted {KeywordCount} keywords, {SizeCount} size variants, {SynonymCount} synonyms",
-            bomItem.Keywords.Count, bomItem.SizeVariants.Count, bomItem.Synonyms.Count);
-
-        // Step 2: Select strategy (fall back to FamilyFirst / Off when the requested mode is unavailable)
-        var effectiveMode = _strategies.ContainsKey(mode) ? mode : SemanticSearchMode.FamilyFirst;
-        if (!_strategies.ContainsKey(effectiveMode))
-            effectiveMode = SemanticSearchMode.Off;
-
-        var strategy = _strategies[effectiveMode];
-        _logger.LogDebug("Using strategy: {Strategy} (requested: {Requested})",
-            strategy.GetType().Name, mode);
-
-        // Step 3: Execute
-        var result = await strategy.ExecuteAsync(bomText, bomItem, cancellationToken);
-
-        // Step 4: Resolve family object for label (ProductFirst only returns string)
-        MaterialFamily? primaryFamily = null;
-        if (result.FamilyLabel != null)
-        {
-            primaryFamily = (await _materialFamilyRepository.FindByKeywordsAsync(
-                new[] { result.FamilyLabel }, cancellationToken)).FirstOrDefault();
-        }
+        var searchResult = await SearchItemAsync(item, cancellationToken);
 
         stopwatch.Stop();
         _logger.LogInformation("Search completed in {ElapsedMs}ms with {MatchCount} matches",
-            stopwatch.ElapsedMilliseconds, result.Matches.Count);
+            stopwatch.ElapsedMilliseconds, searchResult.MatchCount);
+
+        return searchResult with { ExecutionTimeMs = stopwatch.ElapsedMilliseconds };
+    }
+
+    /// <summary>
+    /// Search for a single BOM line item using the configured strategy.
+    /// </summary>
+    private async Task<SearchResult> SearchItemAsync(BomLineItem item, CancellationToken cancellationToken)
+    {
+        var itemStopwatch = Stopwatch.StartNew();
+
+        var result = await _strategy.ExecuteAsync(item, cancellationToken);
+
+        itemStopwatch.Stop();
 
         return new SearchResult
         {
-            Query = bomText,
-            SizeVariants = bomItem.SizeVariants,
-            Keywords = bomItem.Synonyms,
-            FamilyLabel = primaryFamily?.FamilyLabel ?? result.FamilyLabel,
+            Query = item.Spec,
+            FamilyLabel = result.FamilyLabel,
             CsiCode = result.CsiCode,
             Matches = result.Matches,
-            ExecutionTimeMs = stopwatch.ElapsedMilliseconds,
+            ExecutionTimeMs = itemStopwatch.ElapsedMilliseconds,
             Warnings = result.Warnings
         };
     }

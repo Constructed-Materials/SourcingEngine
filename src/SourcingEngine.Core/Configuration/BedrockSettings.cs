@@ -42,12 +42,12 @@ public class BedrockSettings
     /// <summary>
     /// Model ID for LLM query parsing. Can be any Bedrock model that supports the Converse API.
     /// Examples:
-    ///   - anthropic.claude-3-5-haiku-20241022-v1:0 (fast, cheap, great for structured JSON)
-    ///   - amazon.nova-micro-v1:0 (AWS-native, cheap)
-    ///   - amazon.nova-lite-v1:0 (AWS-native, balanced)
-    ///   - meta.llama3-1-8b-instruct-v1:0
+    ///   - us.amazon.nova-lite-v1:0 (cheap, good at structured JSON — default)
+    ///   - us.amazon.nova-micro-v1:0 (cheapest, but weak at complex prompts)
+    ///   - us.amazon.nova-pro-v1:0 (most capable, higher cost)
+    ///   - us.meta.llama3-1-8b-instruct-v1:0
     /// </summary>
-    public string ParsingModelId { get; set; } = "anthropic.claude-3-5-haiku-20241022-v1:0";
+    public string ParsingModelId { get; set; } = "us.amazon.nova-lite-v1:0";
 
     /// <summary>
     /// Maximum tokens for LLM parsing response.

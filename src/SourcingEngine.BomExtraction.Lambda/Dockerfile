@@ -8,6 +8,7 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy csproj files first for layer caching of NuGet restore
+COPY src/SourcingEngine.Common/SourcingEngine.Common.csproj src/SourcingEngine.Common/
 COPY src/SourcingEngine.BomExtraction/SourcingEngine.BomExtraction.csproj src/SourcingEngine.BomExtraction/
 COPY src/SourcingEngine.BomExtraction.Lambda/SourcingEngine.BomExtraction.Lambda.csproj src/SourcingEngine.BomExtraction.Lambda/
 
@@ -15,6 +16,7 @@ RUN dotnet restore src/SourcingEngine.BomExtraction.Lambda/SourcingEngine.BomExt
     --runtime linux-x64
 
 # Copy all source files
+COPY src/SourcingEngine.Common/ src/SourcingEngine.Common/
 COPY src/SourcingEngine.BomExtraction/ src/SourcingEngine.BomExtraction/
 COPY src/SourcingEngine.BomExtraction.Lambda/ src/SourcingEngine.BomExtraction.Lambda/
 

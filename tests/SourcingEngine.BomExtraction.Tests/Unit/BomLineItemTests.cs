@@ -1,4 +1,5 @@
-using SourcingEngine.BomExtraction.Models;
+using SourcingEngine.Common.Models;
+using ExtractionResult = SourcingEngine.BomExtraction.Models.ExtractionResult;
 
 namespace SourcingEngine.BomExtraction.Tests.Unit;
 

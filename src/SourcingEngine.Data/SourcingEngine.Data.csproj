@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SourcingEngine.Core\SourcingEngine.Core.csproj" />
+    <ProjectReference Include="..\SourcingEngine.Common\SourcingEngine.Common.csproj" />
   </ItemGroup>
 
 </Project>

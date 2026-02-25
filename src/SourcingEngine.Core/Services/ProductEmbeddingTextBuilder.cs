@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace SourcingEngine.Core.Services;
@@ -92,14 +93,15 @@ public class ProductEmbeddingInput
 public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
 {
     private readonly ILogger<ProductEmbeddingTextBuilder> _logger;
-    private readonly ISizeCalculator _sizeCalculator;
 
-    public ProductEmbeddingTextBuilder(
-        ILogger<ProductEmbeddingTextBuilder> logger,
-        ISizeCalculator sizeCalculator)
+    // Simple regex for extracting dimension values from text (e.g., "8 inch", "200mm")
+    private static readonly Regex DimensionPattern = new(
+        @"(\d+(?:\.\d+)?)\s*(inch|in|""|cm|mm|feet|ft|m)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    public ProductEmbeddingTextBuilder(ILogger<ProductEmbeddingTextBuilder> logger)
     {
         _logger = logger;
-        _sizeCalculator = sizeCalculator;
     }
 
     public string BuildEmbeddingText(ProductEmbeddingInput product)
@@ -167,7 +169,7 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
             }
         }
 
-        // Extract dimensions from description if not in specs
+        // Extract dimensions from description if not already in specs
         if (!string.IsNullOrWhiteSpace(product.Description))
         {
             var descDimensions = ExtractDimensionsFromText(product.Description);
@@ -177,7 +179,7 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
             }
         }
 
-        // Also try to extract from model name (e.g., "BCI® 5000s 1.8 I-Joist")
+        // Also try to extract from model name
         if (!string.IsNullOrWhiteSpace(product.ModelName))
         {
             var modelDimensions = ExtractDimensionsFromText(product.ModelName);
@@ -190,7 +192,7 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
         return string.Join(" | ", specs);
     }
 
-    private string FormatSpecification(SpecificationItem spec)
+    private static string FormatSpecification(SpecificationItem spec)
     {
         if (string.IsNullOrWhiteSpace(spec.Value))
             return string.Empty;
@@ -198,20 +200,6 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
         var name = spec.Name?.ToLowerInvariant() ?? "unknown";
         var value = spec.Value.Trim();
         var unit = spec.Unit;
-
-        // Handle size/dimension specs specially
-        if (name.Contains("size") || name.Contains("dimension"))
-        {
-            var normalized = NormalizeSizeValue(value);
-            return $"size: {normalized}";
-        }
-
-        // Handle thickness
-        if (name.Contains("thick"))
-        {
-            var normalized = NormalizeSizeValue($"{value} {unit}");
-            return $"thickness: {normalized}";
-        }
 
         // Format with unit if present
         if (!string.IsNullOrWhiteSpace(unit))
@@ -222,45 +210,17 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
         return $"{name}: {value}";
     }
 
-    private string NormalizeSizeValue(string value)
+    private static string ExtractDimensionsFromText(string text)
     {
-        // Use SizeCalculator to normalize dimensions
-        // Extract numeric dimensions and convert to consistent format
-        var size = _sizeCalculator.ExtractSize(value);
-        if (size.HasValue)
+        var match = DimensionPattern.Match(text);
+        if (match.Success)
         {
-            // Convert to inches
-            var inches = ConvertToInches(size.Value.Value, size.Value.Unit);
-            var mm = inches * 25.4;
-            return $"{inches:F1}\" ({mm:F0}mm)";
-        }
-
-        return value;
-    }
-
-    private string ExtractDimensionsFromText(string text)
-    {
-        var size = _sizeCalculator.ExtractSize(text);
-        if (size.HasValue)
-        {
-            var inches = ConvertToInches(size.Value.Value, size.Value.Unit);
-            return $"size: {inches:F1}\" ({inches * 25.4:F0}mm)";
+            return $"size: {match.Value}";
         }
         return string.Empty;
     }
 
-    private static double ConvertToInches(double value, string unit)
-    {
-        return unit.ToLowerInvariant() switch
-        {
-            "inch" or "in" or "\"" => value,
-            "cm" => value / 2.54,
-            "mm" => value / 25.4,
-            _ => value
-        };
-    }
-
-    private string FormatFamilyLabel(string? familyLabel)
+    private static string FormatFamilyLabel(string? familyLabel)
     {
         if (string.IsNullOrWhiteSpace(familyLabel))
             return string.Empty;
@@ -270,17 +230,15 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
         return $"{readable} ({familyLabel})";
     }
 
-    private string CleanDescription(string? description)
+    private static string CleanDescription(string? description)
     {
         if (string.IsNullOrWhiteSpace(description))
             return string.Empty;
 
-        // Remove redundant spec data that will be in TECHNICALSPECS section
-        // Keep the narrative/descriptive parts
         return description.Trim();
     }
 
-    private string ExtractKeyFeatures(string? keyFeaturesJson)
+    private static string ExtractKeyFeatures(string? keyFeaturesJson)
     {
         if (string.IsNullOrWhiteSpace(keyFeaturesJson))
             return string.Empty;
@@ -315,7 +273,7 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
         return string.Empty;
     }
 
-    private void AppendSection(StringBuilder sb, string sectionName, string? content)
+    private static void AppendSection(StringBuilder sb, string sectionName, string? content)
     {
         if (string.IsNullOrWhiteSpace(content))
             return;

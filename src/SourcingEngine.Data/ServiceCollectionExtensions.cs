@@ -16,7 +16,7 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Registers all SourcingEngine services: configuration, data layer, core services,
-    /// and conditionally Ollama or local embedding services.
+    /// and Bedrock embedding/LLM services (required).
     /// </summary>
     public static IServiceCollection AddSourcingEngine(
         this IServiceCollection services,
@@ -25,7 +25,6 @@ public static class ServiceCollectionExtensions
         // Configuration
         services.Configure<DatabaseSettings>(configuration.GetSection("Database"));
         services.Configure<SemanticSearchSettings>(configuration.GetSection("SemanticSearch"));
-        services.Configure<OllamaSettings>(configuration.GetSection("Ollama"));
 
         // Data layer
         services.AddSingleton<IDbConnectionFactory, NpgsqlConnectionFactory>();
@@ -37,44 +36,23 @@ public static class ServiceCollectionExtensions
 
         // Core services
         services.AddMemoryCache();
-        services.AddSingleton<ISizeCalculator, SizeCalculator>();
-        services.AddSingleton<ISynonymExpander, SynonymExpander>();
-        services.AddSingleton<IInputNormalizer, InputNormalizer>();
         services.AddSingleton<IProductEmbeddingTextBuilder, ProductEmbeddingTextBuilder>();
-        services.AddSingleton<ISearchFusionService, RrfFusionService>();
+        services.AddSingleton<IQueryEmbeddingTextBuilder, QueryEmbeddingTextBuilder>();
 
-        // Embedding & LLM services — conditional on provider config
-        // Priority: Bedrock > Ollama > Local fallback
+        // Bedrock embedding & LLM services (required)
         var bedrockSettings = configuration.GetSection("Bedrock").Get<BedrockSettings>();
-        var ollamaSettings = configuration.GetSection("Ollama").Get<OllamaSettings>();
-
-        if (bedrockSettings?.Enabled == true)
+        if (bedrockSettings?.Enabled != true)
         {
-            // AWS Bedrock — for cloud deployments (ECS/Lambda)
-            services.Configure<BedrockSettings>(configuration.GetSection("Bedrock"));
-            services.AddSingleton<IEmbeddingService, BedrockEmbeddingService>();
-            services.AddSingleton<IQueryParserService, BedrockQueryParserService>();
-        }
-        else if (ollamaSettings?.Enabled == true)
-        {
-            services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
-            services.AddHttpClient<IQueryParserService, OllamaQueryParserService>();
-        }
-        else
-        {
-            services.AddSingleton<IEmbeddingService, LocalEmbeddingService>();
-            // IQueryParserService not registered — ProductFirstStrategy handles null gracefully
+            throw new InvalidOperationException(
+                "Bedrock must be enabled. Set Bedrock:Enabled=true in configuration.");
         }
 
-        // Search strategies (registered as ISearchStrategy for collection injection)
-        services.AddScoped<FamilyFirstStrategy>();
-        services.AddScoped<ISearchStrategy>(sp => sp.GetRequiredService<FamilyFirstStrategy>());
-        // Also register FamilyFirst for SemanticSearchMode.Off (same logic, just with semantic disabled)
-        services.AddScoped<ProductFirstStrategy>();
-        services.AddScoped<ISearchStrategy>(sp => sp.GetRequiredService<ProductFirstStrategy>());
-        services.AddScoped<HybridStrategy>();
-        services.AddScoped<ISearchStrategy>(sp => sp.GetRequiredService<HybridStrategy>());
+        services.Configure<BedrockSettings>(configuration.GetSection("Bedrock"));
+        services.AddSingleton<IEmbeddingService, BedrockEmbeddingService>();
+        services.AddSingleton<IQueryParserService, BedrockQueryParserService>();
 
+        // Search strategy — single ProductFirst strategy
+        services.AddScoped<ISearchStrategy, ProductFirstStrategy>();
         services.AddScoped<ISearchOrchestrator, SearchOrchestrator>();
         services.AddScoped<IEmbeddingGenerationService, EmbeddingGenerationService>();
 

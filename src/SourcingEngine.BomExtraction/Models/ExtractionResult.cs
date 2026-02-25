@@ -1,3 +1,5 @@
+using SourcingEngine.Common.Models;
+
 namespace SourcingEngine.BomExtraction.Models;
 
 /// <summary>

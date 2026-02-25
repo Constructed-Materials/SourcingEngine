@@ -16,7 +16,10 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
     <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.16" />
     <PackageReference Include="Pgvector" Version="0.3.0" />
-    <PackageReference Include="SmartComponents.LocalEmbeddings" Version="0.1.0-preview10148" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SourcingEngine.Common\SourcingEngine.Common.csproj" />
   </ItemGroup>
 
 </Project>

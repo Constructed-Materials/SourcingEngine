@@ -1,3 +1,4 @@
+using SourcingEngine.Common.Models;
 using SourcingEngine.Core.Models;
 
 namespace SourcingEngine.Core.Services;
@@ -23,26 +24,17 @@ public record SearchStrategyResult
 
 /// <summary>
 /// Strategy interface for pluggable search algorithms.
-/// Each implementation encapsulates a single search approach
-/// (FamilyFirst, ProductFirst, or Hybrid).
+/// Accepts a <see cref="BomLineItem"/> from the extraction pipeline.
 /// </summary>
 public interface ISearchStrategy
 {
     /// <summary>
-    /// The <see cref="SemanticSearchMode"/> this strategy handles.
-    /// Used by the orchestrator to select the right strategy at runtime.
+    /// Execute the search strategy for the given BOM line item.
     /// </summary>
-    SemanticSearchMode Mode { get; }
-
-    /// <summary>
-    /// Execute the search strategy for the given request.
-    /// </summary>
-    /// <param name="bomText">Original BOM text (may be used for embedding generation).</param>
-    /// <param name="bomItem">Pre-normalized BOM item with keywords, sizes, synonyms.</param>
+    /// <param name="item">BOM line item from the extraction pipeline.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Strategy-specific search results.</returns>
     Task<SearchStrategyResult> ExecuteAsync(
-        string bomText,
-        BomItem bomItem,
+        BomLineItem item,
         CancellationToken cancellationToken);
 }

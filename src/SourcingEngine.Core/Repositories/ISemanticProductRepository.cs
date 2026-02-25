@@ -17,8 +17,8 @@ public interface ISemanticProductRepository
     /// <returns>List of products with similarity scores, ordered by similarity descending</returns>
     Task<List<SemanticProductMatch>> SearchByEmbeddingAsync(
         float[] queryEmbedding,
-        float matchThreshold = 0.5f,
-        int matchCount = 10,
+        float matchThreshold = 0.3f,
+        int matchCount = 20,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -27,8 +27,8 @@ public interface ISemanticProductRepository
     Task<List<SemanticProductMatch>> SearchByEmbeddingAsync(
         float[] queryEmbedding,
         string? familyLabel,
-        float matchThreshold = 0.5f,
-        int matchCount = 10,
+        float matchThreshold = 0.3f,
+        int matchCount = 20,
         CancellationToken cancellationToken = default);
 }
 
