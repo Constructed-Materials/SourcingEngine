@@ -161,6 +161,12 @@ public class ProductMatchDto
     [JsonPropertyName("semanticScore")]
     public float? SemanticScore { get; set; }
 
+    [JsonPropertyName("finalScore")]
+    public float? FinalScore { get; set; }
+
+    [JsonPropertyName("technicalSpecs")]
+    public Dictionary<string, object>? TechnicalSpecs { get; set; }
+
     [JsonPropertyName("sourceSchema")]
     public string? SourceSchema { get; set; }
 }

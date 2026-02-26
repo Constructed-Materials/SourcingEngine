@@ -203,6 +203,8 @@ public class Function
                     UseWhen = m.UseWhen,
                     KeyFeatures = m.KeyFeatures,
                     SemanticScore = m.SemanticScore,
+                    FinalScore = m.FinalScore,
+                    TechnicalSpecs = m.TechnicalSpecs,
                     SourceSchema = m.SourceSchema,
                 }).ToList(),
             }).ToList(),
