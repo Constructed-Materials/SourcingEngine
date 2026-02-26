@@ -20,4 +20,23 @@ public class SemanticSearchSettings
     /// Lower values return more results; typical range 0.25-0.50.
     /// </summary>
     public float SimilarityThreshold { get; set; } = 0.3f;
+
+    /// <summary>
+    /// Whether post-retrieval specification re-ranking is enabled.
+    /// When true, semantic results are re-scored by blending cosine similarity
+    /// with structured specification matching (dimensional proximity + categorical match).
+    /// </summary>
+    public bool EnableSpecReRanking { get; set; } = true;
+
+    /// <summary>
+    /// Weight for the semantic (cosine similarity) component in the blended score.
+    /// Must sum to 1.0 with <see cref="SpecMatchWeight"/>.
+    /// </summary>
+    public float SemanticWeight { get; set; } = 0.6f;
+
+    /// <summary>
+    /// Weight for the specification match component in the blended score.
+    /// Must sum to 1.0 with <see cref="SemanticWeight"/>.
+    /// </summary>
+    public float SpecMatchWeight { get; set; } = 0.4f;
 }

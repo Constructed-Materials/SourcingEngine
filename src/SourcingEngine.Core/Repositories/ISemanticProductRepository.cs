@@ -30,6 +30,19 @@ public interface ISemanticProductRepository
         float matchThreshold = 0.3f,
         int matchCount = 20,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Find products by semantic similarity with structured inline filtering (hybrid search).
+    /// Filters are applied as WHERE conditions during the vector search, not post-search.
+    /// This is the preferred overload for production use — combines vector ranking with
+    /// structured metadata filters in a single SQL query for optimal performance.
+    /// </summary>
+    Task<List<SemanticProductMatch>> SearchByEmbeddingAsync(
+        float[] queryEmbedding,
+        SearchFilters? filters,
+        float matchThreshold = 0.3f,
+        int matchCount = 20,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -51,4 +64,11 @@ public record SemanticProductMatch
     /// Cosine similarity score (0.0 to 1.0, higher is more similar)
     /// </summary>
     public float Similarity { get; init; }
+
+    /// <summary>
+    /// Blended score after spec re-ranking (semantic × α + spec × β).
+    /// Null if re-ranking was not applied. When set, results should be
+    /// sorted by this score rather than <see cref="Similarity"/>.
+    /// </summary>
+    public float? FinalScore { get; init; }
 }

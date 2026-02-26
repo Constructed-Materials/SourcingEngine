@@ -21,6 +21,7 @@ public class ProductFirstStrategyTests
     private readonly Mock<IEmbeddingService> _embeddingMock;
     private readonly Mock<IQueryParserService> _queryParserMock;
     private readonly Mock<IQueryEmbeddingTextBuilder> _queryEmbeddingTextBuilderMock;
+    private readonly Mock<ISpecMatchReRanker> _specMatchReRankerMock;
     private readonly Mock<ILogger<ProductFirstStrategy>> _loggerMock;
     private readonly SemanticSearchSettings _settings;
 
@@ -32,6 +33,7 @@ public class ProductFirstStrategyTests
             _embeddingMock.Object,
             _queryParserMock.Object,
             _queryEmbeddingTextBuilderMock.Object,
+            _specMatchReRankerMock.Object,
             Options.Create(_settings),
             _loggerMock.Object);
     }
@@ -43,6 +45,7 @@ public class ProductFirstStrategyTests
         _embeddingMock = new Mock<IEmbeddingService>();
         _queryParserMock = new Mock<IQueryParserService>();
         _queryEmbeddingTextBuilderMock = new Mock<IQueryEmbeddingTextBuilder>();
+        _specMatchReRankerMock = new Mock<ISpecMatchReRanker>();
         _loggerMock = new Mock<ILogger<ProductFirstStrategy>>();
 
         _settings = new SemanticSearchSettings
@@ -75,6 +78,15 @@ public class ProductFirstStrategyTests
         _queryEmbeddingTextBuilderMock
             .Setup(b => b.BuildQueryEmbeddingText(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>()))
             .Returns<BomLineItem, ParsedBomQuery>((item, _) => $"[DESCRIPTION] {item.Spec}");
+
+        // Default: semantic search returns empty
+        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SemanticProductMatch>());
+
+        // Default: re-ranker passes through unchanged
+        _specMatchReRankerMock.Setup(r => r.ReRank(It.IsAny<List<SemanticProductMatch>>(), It.IsAny<TechnicalSpecs?>()))
+            .Returns((List<SemanticProductMatch> matches, TechnicalSpecs? _) => matches);
     }
 
     private static BomLineItem MakeItem(string spec, string? bomItem = null) => new()
@@ -102,7 +114,7 @@ public class ProductFirstStrategyTests
     {
         var match = MakeMatch("Acme", "Widget-100", "cmu_blocks", "042200", 0.85f);
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), _settings.SimilarityThreshold, _settings.MatchCount, It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), _settings.SimilarityThreshold, _settings.MatchCount, It.IsAny<CancellationToken>()))
             .ReturnsAsync([match]);
 
         var sut = CreateStrategy();
@@ -228,7 +240,7 @@ public class ProductFirstStrategyTests
             MakeMatch("V3", "M3", "masonry"),
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
@@ -246,7 +258,7 @@ public class ProductFirstStrategyTests
             MakeMatch("V2", "M2", family: ""),
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
@@ -267,7 +279,7 @@ public class ProductFirstStrategyTests
             MakeMatch("V3", "M3", csi: "099999"),
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
@@ -287,7 +299,7 @@ public class ProductFirstStrategyTests
             MakeMatch("Kawneer", "1600UT", id: productId)
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
         _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(
@@ -327,7 +339,7 @@ public class ProductFirstStrategyTests
             MakeMatch("V3", "M3", id: id3),
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
         _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(
@@ -362,7 +374,7 @@ public class ProductFirstStrategyTests
     public async Task ExecuteAsync_SemanticRepoFailure_Throws()
     {
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("DB connection lost"));
 
         var sut = CreateStrategy();
@@ -382,7 +394,7 @@ public class ProductFirstStrategyTests
             MakeMatch("V3", "LowMatch", similarity: 0.51f),
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
         var sut = CreateStrategy();
@@ -401,14 +413,14 @@ public class ProductFirstStrategyTests
         _settings.MatchCount = 5;
 
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), 0.3f, 5, It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), 0.3f, 5, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SemanticProductMatch>());
 
         var sut = CreateStrategy();
         await sut.ExecuteAsync(MakeItem("query"), CancellationToken.None);
 
         _semanticRepoMock.Verify(r => r.SearchByEmbeddingAsync(
-            It.IsAny<float[]>(), 0.3f, 5, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), 0.3f, 5, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -417,14 +429,14 @@ public class ProductFirstStrategyTests
         _settings.SimilarityThreshold = 0.7f;
 
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), 0.7f, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), 0.7f, It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SemanticProductMatch>());
 
         var sut = CreateStrategy();
         await sut.ExecuteAsync(MakeItem("query"), CancellationToken.None);
 
         _semanticRepoMock.Verify(r => r.SearchByEmbeddingAsync(
-            It.IsAny<float[]>(), 0.7f, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), 0.7f, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Cancellation ───────────────────────────────────────────────
@@ -450,7 +462,7 @@ public class ProductFirstStrategyTests
     {
         var productId = Guid.NewGuid();
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
-                It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([MakeMatch("V1", "M1", id: productId)]);
 
         _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(

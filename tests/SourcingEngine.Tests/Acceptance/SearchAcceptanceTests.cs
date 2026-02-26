@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using SourcingEngine.Common.Models;
+using SourcingEngine.Core.Models;
 using SourcingEngine.Core.Services;
 using SourcingEngine.Tests.Fixtures;
 using Xunit;
@@ -47,6 +49,36 @@ public class SearchAcceptanceTests
             $"Expected ≥1 distinct vendors, got {distinctVendors}");
         
         Assert.Equal("cmu_blocks", result.FamilyLabel);
+    }
+
+    [Fact]
+    public async Task Search_MasonryBlockAsBlockItem_ReturnsMinimumMatches()
+    {
+        using var scope = _fixture.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
+        var bomLineItem =  new BomLineItem { BomItem = "Masonry block", Spec = "20cm masonry block (CMU)" };
+        var request = new SourcingRequest
+        {
+            ExtractionResult = new ExtractionResultMessage
+            {
+                TraceId = Guid.NewGuid().ToString(),
+                ProjectId = "test-project",
+                SourceFile = "test-file.csv",
+                Items = new List<BomLineItem> { bomLineItem }
+            }
+        };
+        var result = await orchestrator.SearchAsync(request);
+
+        //OutputResult(result.);
+        
+        Assert.True(result.Items.FirstOrDefault().SearchResult.MatchCount >= 3, 
+            $"Expected ≥3 matches for masonry block, got {result.Items.Count}");
+        
+        // var distinctVendors = result.Matches.Select(m => m.Vendor).Distinct().Count();
+        // Assert.True(distinctVendors >= 1, 
+        //     $"Expected ≥1 distinct vendors, got {distinctVendors}");
+        
+        // Assert.Equal("cmu_blocks", result.FamilyLabel);
     }
 
     /// <summary>

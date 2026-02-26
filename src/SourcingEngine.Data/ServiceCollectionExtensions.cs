@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.AddMemoryCache();
         services.AddSingleton<IProductEmbeddingTextBuilder, ProductEmbeddingTextBuilder>();
         services.AddSingleton<IQueryEmbeddingTextBuilder, QueryEmbeddingTextBuilder>();
+        services.AddSingleton<ISpecMatchReRanker, SpecMatchReRanker>();
 
         // Bedrock embedding & LLM services (required)
         var bedrockSettings = configuration.GetSection("Bedrock").Get<BedrockSettings>();

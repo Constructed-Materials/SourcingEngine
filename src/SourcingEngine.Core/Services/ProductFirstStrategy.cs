@@ -19,6 +19,7 @@ public class ProductFirstStrategy : ISearchStrategy
     private readonly IEmbeddingService _embeddingService;
     private readonly IQueryParserService _queryParserService;
     private readonly IQueryEmbeddingTextBuilder _queryEmbeddingTextBuilder;
+    private readonly ISpecMatchReRanker _specMatchReRanker;
     private readonly SemanticSearchSettings _settings;
     private readonly ILogger<ProductFirstStrategy> _logger;
 
@@ -28,6 +29,7 @@ public class ProductFirstStrategy : ISearchStrategy
         IEmbeddingService embeddingService,
         IQueryParserService queryParserService,
         IQueryEmbeddingTextBuilder queryEmbeddingTextBuilder,
+        ISpecMatchReRanker specMatchReRanker,
         IOptions<SemanticSearchSettings> settings,
         ILogger<ProductFirstStrategy> logger)
     {
@@ -36,6 +38,7 @@ public class ProductFirstStrategy : ISearchStrategy
         _embeddingService = embeddingService;
         _queryParserService = queryParserService;
         _queryEmbeddingTextBuilder = queryEmbeddingTextBuilder;
+        _specMatchReRanker = specMatchReRanker;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -70,9 +73,15 @@ public class ProductFirstStrategy : ISearchStrategy
             // Step 3: Generate embedding
             var embedding = await _embeddingService.GenerateEmbeddingAsync(textToEmbed, cancellationToken);
 
-            // Step 4: Semantic search
+            // Step 4: Build inline search filters from parsed query (hybrid search)
+            var filters = parsedQuery.Success
+                ? BuildSearchFilters(parsedQuery)
+                : null;
+
+            // Step 5: Semantic search with inline filters
             var semanticMatches = await _semanticProductRepository.SearchByEmbeddingAsync(
                 embedding,
+                filters,
                 _settings.SimilarityThreshold,
                 _settings.MatchCount,
                 cancellationToken);
@@ -80,18 +89,24 @@ public class ProductFirstStrategy : ISearchStrategy
             _logger.LogInformation("Semantic search found {Count} products above threshold {Threshold}",
                 semanticMatches.Count, _settings.SimilarityThreshold);
 
-            // Step 5: Derive family label from most common result
+            // Step 6: Post-retrieval specification re-ranking
+            if (parsedQuery.Success)
+            {
+                semanticMatches = _specMatchReRanker.ReRank(semanticMatches, parsedQuery.TechnicalSpecs);
+            }
+
+            // Step 7: Derive family label from most common result
             var familyLabel = semanticMatches
                 .Where(sm => !string.IsNullOrWhiteSpace(sm.FamilyLabel))
                 .GroupBy(sm => sm.FamilyLabel)
                 .OrderByDescending(g => g.Count())
                 .FirstOrDefault()?.Key;
 
-            // Step 6: Derive CSI code
+            // Step 8: Derive CSI code
             var csiCode = semanticMatches
                 .FirstOrDefault(sm => !string.IsNullOrWhiteSpace(sm.CsiCode))?.CsiCode;
 
-            // Step 7: Enrich with vendor-specific data
+            // Step 9: Enrich with vendor-specific data
             var productIds = semanticMatches.Select(sm => sm.ProductId).ToList();
             var enrichedData = await _productEnrichedRepository.GetEnrichedDataAsync(productIds, cancellationToken);
             var enrichedLookup = enrichedData.ToDictionary(e => e.ProductId, e => e);
@@ -99,7 +114,7 @@ public class ProductFirstStrategy : ISearchStrategy
             _logger.LogDebug("Enriched {EnrichedCount}/{TotalCount} semantic matches with vendor data",
                 enrichedData.Count, semanticMatches.Count);
 
-            // Step 8: Convert to ProductMatch
+            // Step 10: Convert to ProductMatch
             var matches = semanticMatches.Select(sm =>
             {
                 enrichedLookup.TryGetValue(sm.ProductId, out var enriched);
@@ -115,7 +130,8 @@ public class ProductFirstStrategy : ISearchStrategy
                     TechnicalSpecs = QueryUtilities.ParseJsonObject(enriched?.TechnicalSpecsJson),
                     PerformanceData = QueryUtilities.ParseJsonObject(enriched?.PerformanceDataJson),
                     SourceSchema = enriched?.SourceSchema,
-                    SemanticScore = sm.Similarity
+                    SemanticScore = sm.Similarity,
+                    FinalScore = sm.FinalScore
                 };
             }).ToList();
 
@@ -133,6 +149,31 @@ public class ProductFirstStrategy : ISearchStrategy
             warnings.Add($"Semantic search failed: {ex.Message}");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Build inline search filters from the LLM-parsed query.
+    /// Currently filters by family label when the LLM is confident about it.
+    /// </summary>
+    private static Models.SearchFilters? BuildSearchFilters(ParsedBomQuery parsedQuery)
+    {
+        if (string.IsNullOrWhiteSpace(parsedQuery.MaterialFamily))
+            return null;
+
+        // Only apply family filter when LLM confidence is high enough to avoid
+        // false negatives from incorrect family classification
+        if (parsedQuery.Confidence < 0.8f)
+            return null;
+
+        return new Models.SearchFilters
+        {
+            FamilyLabel = parsedQuery.MaterialFamily switch
+            {
+                // Map LLM material family names to DB family_label values
+                "cmu" => "cmu_blocks",
+                _ => null // Don't filter on families we can't confidently map
+            }
+        };
     }
 
     /// <summary>

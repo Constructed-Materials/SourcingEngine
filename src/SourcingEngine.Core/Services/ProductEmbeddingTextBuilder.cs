@@ -142,14 +142,56 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
     {
         var specs = new List<string>();
 
-        // Parse specifications JSON
+        // Parse specifications JSON — handle both array and object formats
         if (!string.IsNullOrWhiteSpace(product.SpecificationsJson))
         {
-            try
+            specs.AddRange(ParseSpecificationsJson(product.SpecificationsJson, product.ProductId));
+        }
+
+        // Extract dimensions from description if not already in specs
+        if (!string.IsNullOrWhiteSpace(product.Description) && specs.Count == 0)
+        {
+            var descDimensions = ExtractDimensionsFromText(product.Description);
+            if (!string.IsNullOrWhiteSpace(descDimensions))
             {
+                specs.Add(descDimensions);
+            }
+        }
+
+        // Also try to extract from model name
+        if (!string.IsNullOrWhiteSpace(product.ModelName) && specs.Count == 0)
+        {
+            var modelDimensions = ExtractDimensionsFromText(product.ModelName);
+            if (!string.IsNullOrWhiteSpace(modelDimensions))
+            {
+                specs.Add(modelDimensions);
+            }
+        }
+
+        return string.Join(" | ", specs);
+    }
+
+    /// <summary>
+    /// Parse specifications JSON, handling both the legacy array format
+    /// <c>[{name, value, unit}]</c> and the actual DB object format
+    /// <c>{key: value}</c> used across all product families.
+    /// Object format values can be: scalar numbers, strings, arrays, booleans.
+    /// Dimensional values are emitted with multi-unit conversion via <see cref="DimensionUnitConverter"/>.
+    /// </summary>
+    internal List<string> ParseSpecificationsJson(string json, Guid productId)
+    {
+        var specs = new List<string>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                // Legacy format: [{name, value, unit}, ...]
                 var specArray = JsonSerializer.Deserialize<List<SpecificationItem>>(
-                    product.SpecificationsJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (specArray != null)
                 {
@@ -157,39 +199,28 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
                     {
                         var specText = FormatSpecification(spec);
                         if (!string.IsNullOrWhiteSpace(specText))
-                        {
                             specs.Add(specText);
-                        }
                     }
                 }
             }
-            catch (JsonException ex)
+            else if (root.ValueKind == JsonValueKind.Object)
             {
-                _logger.LogWarning(ex, "Failed to parse specifications JSON for product {ProductId}", product.ProductId);
+                // Actual DB format: flat object with typed values
+                // Handles: scalars, arrays, booleans — with multi-unit conversion for dimensional keys
+                var dict = new Dictionary<string, JsonElement>();
+                foreach (var prop in root.EnumerateObject())
+                {
+                    dict[prop.Name] = prop.Value.Clone();
+                }
+                specs.AddRange(DimensionUnitConverter.FormatSpecsFromJsonObject(dict));
             }
         }
-
-        // Extract dimensions from description if not already in specs
-        if (!string.IsNullOrWhiteSpace(product.Description))
+        catch (JsonException ex)
         {
-            var descDimensions = ExtractDimensionsFromText(product.Description);
-            if (!string.IsNullOrWhiteSpace(descDimensions) && !specs.Any(s => s.Contains("inch") || s.Contains("mm")))
-            {
-                specs.Add(descDimensions);
-            }
+            _logger.LogWarning(ex, "Failed to parse specifications JSON for product {ProductId}", productId);
         }
 
-        // Also try to extract from model name
-        if (!string.IsNullOrWhiteSpace(product.ModelName))
-        {
-            var modelDimensions = ExtractDimensionsFromText(product.ModelName);
-            if (!string.IsNullOrWhiteSpace(modelDimensions) && !specs.Any(s => s.Contains("inch") || s.Contains("mm")))
-            {
-                specs.Add(modelDimensions);
-            }
-        }
-
-        return string.Join(" | ", specs);
+        return specs;
     }
 
     private static string FormatSpecification(SpecificationItem spec)

@@ -74,4 +74,13 @@ public record ProductMatch
     [JsonPropertyName("semanticScore")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public float? SemanticScore { get; init; }
+
+    /// <summary>
+    /// Final blended score after spec-match re-ranking (0.0-1.0).
+    /// Combines semantic similarity with structured specification matching.
+    /// Null when re-ranking is disabled or specs are unavailable.
+    /// </summary>
+    [JsonPropertyName("finalScore")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public float? FinalScore { get; init; }
 }

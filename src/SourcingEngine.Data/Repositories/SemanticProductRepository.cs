@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using SourcingEngine.Core.Models;
 using SourcingEngine.Core.Repositories;
 using SourcingEngine.Core.Services;
 
@@ -28,12 +29,27 @@ public class SemanticProductRepository : ISemanticProductRepository
         int matchCount = 20,
         CancellationToken cancellationToken = default)
     {
-        return await SearchByEmbeddingAsync(queryEmbedding, null, matchThreshold, matchCount, cancellationToken);
+        return await SearchByEmbeddingAsync(queryEmbedding, (SearchFilters?)null, matchThreshold, matchCount, cancellationToken);
     }
 
     public async Task<List<SemanticProductMatch>> SearchByEmbeddingAsync(
         float[] queryEmbedding,
         string? familyLabel,
+        float matchThreshold = 0.3f,
+        int matchCount = 20,
+        CancellationToken cancellationToken = default)
+    {
+        // Delegate to the new filters-based overload, converting familyLabel to SearchFilters
+        var filters = string.IsNullOrWhiteSpace(familyLabel)
+            ? null
+            : new SearchFilters { FamilyLabel = familyLabel };
+
+        return await SearchByEmbeddingAsync(queryEmbedding, filters, matchThreshold, matchCount, cancellationToken);
+    }
+
+    public async Task<List<SemanticProductMatch>> SearchByEmbeddingAsync(
+        float[] queryEmbedding,
+        SearchFilters? filters,
         float matchThreshold = 0.3f,
         int matchCount = 20,
         CancellationToken cancellationToken = default)
@@ -61,9 +77,27 @@ public class SemanticProductRepository : ISemanticProductRepository
                 "1 - (p.embedding <=> @query_embedding::vector) > @threshold"
             };
 
-            if (!string.IsNullOrWhiteSpace(familyLabel))
+            // Inline structured filters (hybrid search)
+            if (!string.IsNullOrWhiteSpace(filters?.FamilyLabel))
             {
                 whereConditions.Add("p.family_label = @family_label");
+            }
+
+            if (!string.IsNullOrWhiteSpace(filters?.VendorName))
+            {
+                whereConditions.Add("v.name = @vendor_name");
+            }
+
+            // JSONB containment filters on product_knowledge.specifications
+            var specFilterParams = new List<(string ParamName, string Value)>();
+            if (filters?.SpecificationContainmentFilters != null)
+            {
+                for (var i = 0; i < filters.SpecificationContainmentFilters.Count; i++)
+                {
+                    var paramName = $"spec_filter_{i}";
+                    whereConditions.Add($"pk.specifications @> @{paramName}::jsonb");
+                    specFilterParams.Add((paramName, filters.SpecificationContainmentFilters[i]));
+                }
             }
 
             var sql = $@"
@@ -101,12 +135,28 @@ public class SemanticProductRepository : ISemanticProductRepository
             limitParam.Value = matchCount;
             command.Parameters.Add(limitParam);
 
-            if (!string.IsNullOrWhiteSpace(familyLabel))
+            if (!string.IsNullOrWhiteSpace(filters?.FamilyLabel))
             {
                 var typeParam = command.CreateParameter();
                 typeParam.ParameterName = "family_label";
-                typeParam.Value = familyLabel;
+                typeParam.Value = filters.FamilyLabel;
                 command.Parameters.Add(typeParam);
+            }
+
+            if (!string.IsNullOrWhiteSpace(filters?.VendorName))
+            {
+                var vendorParam = command.CreateParameter();
+                vendorParam.ParameterName = "vendor_name";
+                vendorParam.Value = filters.VendorName;
+                command.Parameters.Add(vendorParam);
+            }
+
+            foreach (var (paramName, value) in specFilterParams)
+            {
+                var specParam = command.CreateParameter();
+                specParam.ParameterName = paramName;
+                specParam.Value = value;
+                command.Parameters.Add(specParam);
             }
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
