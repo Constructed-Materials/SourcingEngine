@@ -60,6 +60,33 @@
                 "AWS_PROFILE": "default",
                 "AWS_REGION": "us-east-2"
             }
+        },
+        {
+            "name": "Search Lambda: Local RabbitMQ Consumer",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Search.Lambda.LocalRunner/bin/Debug/net9.0/SourcingEngine.Search.Lambda.LocalRunner.dll",
+            "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Search.Lambda.LocalRunner",
+            "console": "integratedTerminal",
+            "stopAtEntry": false,
+            "env": {
+                "AWS_PROFILE": "default",
+                "AWS_REGION": "us-east-2"
+            }
+        },
+        {
+            "name": "Search Lambda: Replay Event File",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Search.Lambda.LocalRunner/bin/Debug/net9.0/SourcingEngine.Search.Lambda.LocalRunner.dll",
+            "args": ["--event", "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Search.Lambda/local/test-event.json"],
+            "cwd": "${workspaceFolder:SourcingEngine}/src/SourcingEngine.Search.Lambda.LocalRunner",
+            "console": "integratedTerminal",
+            "stopAtEntry": false,
+            "env": {
+                "AWS_PROFILE": "default",
+                "AWS_REGION": "us-east-2"
+            }
         }
     ]
 }

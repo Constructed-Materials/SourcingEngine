@@ -38,6 +38,24 @@
       "auto_delete": false,
       "internal": false,
       "arguments": {}
+    },
+    {
+      "name": "sourcing.engine",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "sourcing.engine.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
     }
   ],
   "queues": [
@@ -56,10 +74,34 @@
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
-      "arguments": {}
+      "arguments": {
+        "x-dead-letter-exchange": "sourcing.engine.dlx",
+        "x-dead-letter-routing-key": "search.poison"
+      }
     },
     {
       "name": "bom-extraction-poison-queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "sourcing-engine-search-results-queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "sourcing-engine-search-zero-results-queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "sourcing-engine-poison-queue",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
@@ -89,6 +131,30 @@
       "destination": "bom-extraction-poison-queue",
       "destination_type": "queue",
       "routing_key": "extract.poison",
+      "arguments": {}
+    },
+    {
+      "source": "sourcing.engine",
+      "vhost": "/",
+      "destination": "sourcing-engine-search-results-queue",
+      "destination_type": "queue",
+      "routing_key": "search.result",
+      "arguments": {}
+    },
+    {
+      "source": "sourcing.engine",
+      "vhost": "/",
+      "destination": "sourcing-engine-search-zero-results-queue",
+      "destination_type": "queue",
+      "routing_key": "search.zero-result",
+      "arguments": {}
+    },
+    {
+      "source": "sourcing.engine.dlx",
+      "vhost": "/",
+      "destination": "sourcing-engine-poison-queue",
+      "destination_type": "queue",
+      "routing_key": "search.poison",
       "arguments": {}
     }
   ]

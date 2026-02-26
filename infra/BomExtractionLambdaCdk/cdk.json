@@ -5,6 +5,8 @@
     "brokerHost": "b-24d11402-33d4-43b1-91a8-4725eb95eade.mq.us-east-2.on.aws",
     "brokerSecretArn": "arn:aws:secretsmanager:us-east-2:866934058848:secret:AmazonMQ/cm-app-queue/bom-extraction-q32K8u",
     "vpcId": "",
-    "queueName": "bom-extraction-queue"
+    "queueName": "bom-extraction-queue",
+    "sourcingQueueName": "bom-extraction-result-queue",
+    "sourcingDbSecretArn": "arn:aws:secretsmanager:us-east-2:866934058848:secret:SourcingEngine/database-connection-8w2u2i"
   }
 }

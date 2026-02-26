@@ -1,17 +1,46 @@
 # Sourcing Engine - Construction Materials Search Application
 
-A .NET console application that implements intelligent search logic for construction materials by parsing BOM (Bill of Materials) line items and finding matching products from a Supabase PostgreSQL database.
+A .NET search engine that matches construction BOM (Bill of Materials) line items to product recommendations from a Supabase PostgreSQL database. Runs as a **console CLI** for development and as **AWS Lambda functions** in production, connected via Amazon MQ RabbitMQ.
 
 ## 🏗️ Architecture Overview
 
-The application follows a **clean architecture** pattern with clear separation of concerns across three main layers:
+### Event-Driven Pipeline
+
+```
+┌──────────────┐      RabbitMQ       ┌──────────────────┐      RabbitMQ       ┌─────────────────┐
+│   Frontend   │ ──extract.request─▶ │ BOM Extraction   │ ──extract.result──▶ │ Search Lambda   │
+│   (submit    │                     │ Lambda           │                     │ (product search │
+│    BOM file) │                     │ (Bedrock Nova)   │                     │  per BOM item)  │
+└──────────────┘                     └──────────────────┘                     └───────┬─────────┘
+                                                                                      │
+                                                                         ┌────────────┴────────────┐
+                                                                         │                         │
+                                                                  search.result          search.zero-result
+                                                                         │                         │
+                                                                         ▼                         ▼
+                                                               ┌─────────────────┐     ┌───────────────────┐
+                                                               │ results-queue   │     │ zero-results-queue│
+                                                               │ (≥1 products)   │     │ (0 products)      │
+                                                               └─────────────────┘     └───────────────────┘
+```
+
+| Exchange | Queue | Routing Key | Purpose |
+|----------|-------|-------------|---------|
+| `bom.extraction` | `bom-extraction-queue` | `extract.request` | Incoming BOM file extraction requests |
+| `bom.extraction` | `bom-extraction-result-queue` | `extract.result` | Extracted BOM line items → triggers Search Lambda |
+| `sourcing.engine` | `sourcing-engine-search-results-queue` | `search.result` | Products found (≥1 match per item) |
+| `sourcing.engine` | `sourcing-engine-search-zero-results-queue` | `search.zero-result` | Items with 0 matches |
+| `bom.extraction.dlx` | `bom-extraction-poison-queue` | `extract.poison` | Extraction failures |
+| `sourcing.engine.dlx` | `sourcing-engine-poison-queue` | `search.poison` | Search failures (DLX on result queue) |
+
+### Core Layers
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                  Console Application                     │
-│  • CLI entry point                                       │
-│  • JSON output serialization                             │
-│  • Dependency injection configuration                    │
+│              Console / Lambda Entry Points                │
+│  • CLI for dev/testing                                   │
+│  • BOM Extraction Lambda (Bedrock Nova Pro)              │
+│  • Search Lambda (SearchOrchestrator)                    │
 └────────────────┬────────────────────────────────────────┘
                  │
 ┌────────────────▼────────────────────────────────────────┐
@@ -97,58 +126,74 @@ graph TD
 
 ```
 SourcingEngine/
-├── SourcingEngine.sln                    # Solution file
+├── SourcingEngine.sln
 │
 ├── src/
-│   ├── SourcingEngine.Core/              # Domain & Business Logic
+│   ├── SourcingEngine.Common/                       # Shared models & contracts
+│   │   └── Models/
+│   │       └── QueueMessages.cs                     # DTOs for RabbitMQ messages
+│   │
+│   ├── SourcingEngine.Core/                         # Domain & Business Logic
 │   │   ├── Models/
-│   │   │   ├── BomItem.cs               # Normalized input representation
-│   │   │   ├── Product.cs               # Base product from public.products
-│   │   │   ├── ProductEnriched.cs       # Vendor-specific intelligence
-│   │   │   ├── ProductMatch.cs          # Search result item
-│   │   │   ├── SearchResult.cs          # Complete search response
-│   │   │   └── MaterialFamily.cs        # Material taxonomy
-│   │   ├── Repositories/
-│   │   │   ├── IMaterialFamilyRepository.cs
-│   │   │   ├── IProductRepository.cs
-│   │   │   └── IProductEnrichedRepository.cs
+│   │   │   ├── BomItem.cs                           # Normalized input
+│   │   │   ├── Product.cs                           # Base product
+│   │   │   ├── ProductEnriched.cs                   # Vendor intelligence
+│   │   │   ├── ProductMatch.cs                      # Search result item
+│   │   │   ├── SearchResult.cs                      # Complete search response
+│   │   │   └── MaterialFamily.cs                    # Material taxonomy
+│   │   ├── Repositories/                            # Interfaces
 │   │   └── Services/
-│   │       ├── ISizeCalculator.cs       # Interface
-│   │       ├── SizeCalculator.cs        # Bidirectional size conversion
-│   │       ├── ISynonymExpander.cs      # Interface
-│   │       ├── SynonymExpander.cs       # Terminology expansion
-│   │       ├── IInputNormalizer.cs      # Interface
-│   │       ├── InputNormalizer.cs       # BOM text processing
-│   │       ├── ISearchOrchestrator.cs   # Interface
-│   │       └── SearchOrchestrator.cs    # Main search pipeline
+│   │       ├── SizeCalculator.cs                    # Bidirectional size conversion
+│   │       ├── SynonymExpander.cs                   # Terminology expansion
+│   │       ├── InputNormalizer.cs                   # BOM text processing
+│   │       └── SearchOrchestrator.cs                # 8-step search pipeline
 │   │
-│   ├── SourcingEngine.Data/              # Database Access Layer
-│   │   ├── DatabaseSettings.cs           # Configuration model
-│   │   ├── NpgsqlConnectionFactory.cs    # Connection management
-│   │   └── Repositories/
-│   │       ├── SchemaDiscoveryService.cs      # Dynamic schema finder
-│   │       ├── MaterialFamilyRepository.cs    # cm_master_materials queries
-│   │       ├── ProductRepository.cs           # products table queries
-│   │       └── ProductEnrichedRepository.cs   # Parallel vendor queries
+│   ├── SourcingEngine.Data/                         # Database Access Layer
+│   │   ├── NpgsqlConnectionFactory.cs               # Connection management
+│   │   └── Repositories/                            # Npgsql implementations
 │   │
-│   └── SourcingEngine.Console/           # CLI Entry Point
-│       ├── Program.cs                    # Main + DI setup
-│       └── appsettings.json             # Configuration
+│   ├── SourcingEngine.Console/                      # CLI Entry Point
+│   │   ├── Program.cs
+│   │   └── appsettings.json
+│   │
+│   ├── SourcingEngine.BomExtraction/                # BOM extraction service
+│   ├── SourcingEngine.BomExtraction.Lambda/         # BOM Extraction Lambda
+│   │   ├── Function.cs                              # Lambda handler
+│   │   ├── Dockerfile                               # Container image
+│   │   └── local/
+│   │       ├── rabbitmq-definitions.json             # Local RabbitMQ topology
+│   │       └── test-event-template.json              # Sample event for replay
+│   ├── SourcingEngine.BomExtraction.Lambda.LocalRunner/  # F5 debug harness
+│   │
+│   ├── SourcingEngine.Search.Lambda/                # ★ Search Lambda
+│   │   ├── Function.cs                              # Lambda handler
+│   │   ├── Dockerfile                               # Container image
+│   │   ├── Configuration/
+│   │   │   └── SearchLambdaSettings.cs              # Broker/exchange config
+│   │   └── Services/
+│   │       └── RabbitMqSearchResultPublisher.cs      # Publishes to results queues
+│   └── SourcingEngine.Search.Lambda.LocalRunner/    # F5 debug harness
+│       └── LocalRunner.cs                           # Live consumer + event replay
 │
-└── tests/
-    └── SourcingEngine.Tests/             # Test Suite
-        ├── Fixtures/
-        │   └── DatabaseFixture.cs       # Shared test infrastructure
-        ├── Unit/
-        │   ├── SizeCalculatorTests.cs   # 15 unit tests
-        │   └── SynonymExpanderTests.cs  # 12 unit tests
-        ├── Integration/
-        │   ├── SchemaDiscoveryTests.cs  # DB schema tests
-        │   ├── MaterialFamilyRepositoryTests.cs
-        │   └── ProductRepositoryTests.cs
-        ├── Acceptance/
-        │   └── SearchAcceptanceTests.cs # E2E test cases
-        └── appsettings.Test.json        # Test configuration
+├── tests/
+│   ├── SourcingEngine.Tests/                        # Core unit/integration tests
+│   ├── SourcingEngine.BomExtraction.Tests/
+│   ├── SourcingEngine.BomExtraction.Lambda.Tests/
+│   └── SourcingEngine.Search.Lambda.Tests/          # ★ Search Lambda tests (16)
+│       ├── FunctionTests.cs                         # Handler logic (10 tests)
+│       └── QueueMessageSerializationTests.cs        # JSON contracts (5 tests)
+│
+├── infra/
+│   └── BomExtractionLambdaCdk/                      # CDK infrastructure (C#)
+│       ├── BomExtractionLambdaStack.cs               # Both Lambdas + topology
+│       ├── cdk.json                                  # Context values
+│       └── lambda/
+│           └── rabbitmq-topology/
+│               └── index.py                          # Custom Resource handler
+│
+└── scripts/
+    ├── deploy-lambda.sh                              # BOM Extraction deploy
+    └── deploy-sourcing-lambda.sh                     # Search Lambda deploy
 ```
 
 ## 🚀 Key Features
@@ -476,6 +521,126 @@ Failed to connect to 54.82.205.23:5432
 2. Check Supabase project is active (not paused)
 3. Verify firewall allows outbound connections to Supabase
 
+## ☁️ AWS Lambda Services
+
+### BOM Extraction Lambda
+
+Extracts structured BOM line items from uploaded documents (PDF, XLSX, CSV) using Amazon Bedrock Nova Pro.
+
+- **Trigger:** `bom-extraction-queue` (via Amazon MQ event source mapping)
+- **Output:** Publishes `ExtractionResultMessage` to `bom.extraction` exchange with routing key `extract.result`
+- **Model:** `us.amazon.nova-pro-v1:0` (cross-region inference profile)
+- **Timeout:** 180s, 512 MB
+
+### Search Lambda
+
+Runs the 8-step search pipeline for each BOM line item, finding matching products from the database.
+
+- **Trigger:** `bom-extraction-result-queue` (output of the extraction Lambda)
+- **Output:** Splits results into two queues:
+  - `sourcing-engine-search-results-queue` — items with ≥1 product match
+  - `sourcing-engine-search-zero-results-queue` — items with 0 matches
+- **Models:** Titan Embed Text v2 (embeddings) + Nova Lite v1 (parsing)
+- **Timeout:** 300s, 1024 MB
+- **Dead Letter:** Failed messages go to `sourcing-engine-poison-queue` via DLX policy on the trigger queue
+
+### Queue Message Contracts
+
+All DTOs live in `SourcingEngine.Common/Models/QueueMessages.cs`:
+
+| Message | Fields | Queue |
+|---------|--------|-------|
+| `ExtractionResultMessage` | traceId, fileName, items[], extractedAt | `bom-extraction-result-queue` |
+| `SourcingResultMessage` | traceId, fileName, items[] (with products[]) | `sourcing-engine-search-results-queue` |
+| `SourcingZeroResultsMessage` | traceId, fileName, items[], publishedAt | `sourcing-engine-search-zero-results-queue` |
+
+## 🏗️ Infrastructure (CDK)
+
+All infrastructure is managed in a single CDK stack: `infra/BomExtractionLambdaCdk/`.
+
+### What the stack provisions
+
+| Resource | Details |
+|----------|---------|
+| **BOM Extraction Lambda** | Docker container image, IAM role (Bedrock + S3 + MQ + Secrets Manager), event source mapping |
+| **Search Lambda** | Docker container image, IAM role (Bedrock + MQ + Secrets Manager), event source mapping |
+| **RabbitMQ Topology** | CDK Custom Resource that calls the RabbitMQ Management API to create exchanges, queues, bindings, and DLX policies |
+
+### RabbitMQ Topology Custom Resource
+
+Since CloudFormation has no native support for RabbitMQ queue/exchange management, we use a **Python Lambda Custom Resource** (`infra/BomExtractionLambdaCdk/lambda/rabbitmq-topology/index.py`) that:
+
+1. Retrieves broker credentials from Secrets Manager
+2. Calls the RabbitMQ Management HTTP API (port 443 on Amazon MQ)
+3. Creates exchanges, queues, and bindings via idempotent PUT/POST calls
+4. Applies DLX policies to existing queues (non-destructive)
+
+**Properties:**
+- **Idempotent** — safe to run on every deploy
+- **Preserves on delete** — stack deletion does NOT remove queues/messages
+- **Conditional** — only runs when `brokerSecretArn` is provided
+
+### CDK Context Values (`cdk.json`)
+
+| Key | Default | Purpose |
+|-----|---------|--------|
+| `brokerArn` | `arn:aws:mq:us-east-2:...` | Amazon MQ broker ARN |
+| `brokerHost` | `b-24d11402-...on.aws` | Broker hostname for Management API |
+| `brokerSecretArn` | (empty) | Secrets Manager ARN for broker credentials |
+| `vpcId` | (empty) | VPC ID (only if broker is private) |
+| `queueName` | `bom-extraction-queue` | BOM extraction trigger queue |
+| `sourcingQueueName` | `bom-extraction-result-queue` | Search Lambda trigger queue |
+| `sourcingDbConnectionString` | (empty) | Supabase PostgreSQL connection string |
+
+### Deploy Commands
+
+```bash
+# BOM Extraction Lambda — build, push to ECR, deploy
+./scripts/deploy-lambda.sh --deploy
+
+# Search Lambda — build, push to ECR, deploy
+./scripts/deploy-sourcing-lambda.sh --deploy
+
+# CDK only (synth dry-run)
+./scripts/deploy-lambda.sh --synth
+
+# Image push only (no CDK deploy)
+./scripts/deploy-sourcing-lambda.sh
+```
+
+Both scripts will:
+1. Build a Docker image (`linux/amd64`)
+2. Create the ECR repository if it doesn't exist
+3. Push the image to ECR
+4. (With `--deploy`) Run `cdk deploy` and update the Lambda function code
+
+## 🔧 Local Development
+
+### LocalRunner (F5 Debugging)
+
+Each Lambda has a **LocalRunner** project for F5 debugging in VS Code:
+
+| Launch Config | What it does |
+|---------------|-------------|
+| `Lambda: Local RabbitMQ Consumer` | Connects to local RabbitMQ, consumes from queue, invokes handler |
+| `Lambda: Replay Event File` | Reads a saved JSON event file and replays it through the handler |
+| `Search Lambda: Local RabbitMQ Consumer` | Same pattern for the Search Lambda |
+| `Search Lambda: Replay Event File` | Replay a saved extraction result through search |
+
+### Local RabbitMQ Setup
+
+Use Docker Compose or standalone Docker with the definitions file:
+
+```bash
+docker run -d --name rabbitmq \
+  -p 5672:5672 -p 15672:15672 \
+  -v $(pwd)/src/SourcingEngine.BomExtraction.Lambda/local/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json \
+  -e RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS='-rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"' \
+  rabbitmq:3-management
+```
+
+This creates all exchanges, queues, and bindings locally (matching the production topology).
+
 ## 📝 License
 
 Internal tool for MVP Partner Package. Not licensed for external use.
@@ -494,7 +659,7 @@ This is a proof-of-concept implementation. For production use:
 
 ## 📚 Related Documentation
 
-- [Database Schema](../01_DATABASE_SCHEMA_SIMPLE.md)
-- [Test Cases](../02_TEST_CASES_WITH_RESULTS.md)
-- [Search Logic A to Z](../05_SEARCH_LOGIC_A_TO_Z.md)
-- [Memory Bank](../MEMORY_BANK/)
+- [Database Schema](docs/01_DATABASE_SCHEMA_SIMPLE.md)
+- [Test Cases](docs/02_TEST_CASES_WITH_RESULTS.md)
+- [Search Logic A to Z](docs/05_SEARCH_LOGIC_A_TO_Z.md)
+- [Memory Bank](docs/MEMORY_BANK/)
