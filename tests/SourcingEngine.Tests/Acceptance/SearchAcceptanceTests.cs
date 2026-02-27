@@ -26,6 +26,49 @@ public class SearchAcceptanceTests
         _output = output;
     }
 
+     [Fact]
+    public async Task Search_DymicProduct_ReturnsMinimumMatches()
+    {
+        using var scope = _fixture.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
+        var bomLineItem = new BomLineItem 
+        { 
+            BomItem = "Private Terrace Paving",
+            Spec = "Calacatta Pavers, Sandblasted, 30mm", 
+            AdditionalData = new Dictionary<string, object?>
+            {
+                ["section"] = "Penthouse",
+                ["uom"] = "sq ft",
+                ["waste_factor"] = 12,
+                ["total_qty_w_waste"] = 1344,
+                ["origin"] = "Italy",
+                ["certifications"] = "LEED v5"
+            }
+        };
+        var request = new SourcingRequest
+        {
+            ExtractionResult = new ExtractionResultMessage
+            {
+                TraceId = Guid.NewGuid().ToString(),
+                ProjectId = "test-project",
+                SourceFile = "test-file.csv",
+                Items = new List<BomLineItem> { bomLineItem }
+            }
+        };
+        var result = await orchestrator.SearchAsync(request);
+
+        //OutputResult(result.);
+        
+        Assert.True(result.Items.FirstOrDefault().SearchResult.MatchCount >= 3, 
+            $"Expected ≥3 matches for masonry block, got {result.Items.Count}");
+        
+        // var distinctVendors = result.Matches.Select(m => m.Vendor).Distinct().Count();
+        // Assert.True(distinctVendors >= 1, 
+        //     $"Expected ≥1 distinct vendors, got {distinctVendors}");
+        
+        // Assert.Equal("cmu_blocks", result.FamilyLabel);
+    }
+
     /// <summary>
     /// Test Case 1: 8" Masonry Block
     /// Expected: ≥3 matches from ≥2 vendors

@@ -26,12 +26,10 @@ public static class ServiceCollectionExtensions
         services.Configure<DatabaseSettings>(configuration.GetSection("Database"));
         services.Configure<SemanticSearchSettings>(configuration.GetSection("SemanticSearch"));
 
-        // Data layer
+        // Data layer — all queries target public.* schema only
         services.AddSingleton<IDbConnectionFactory, NpgsqlConnectionFactory>();
-        services.AddSingleton<ISchemaDiscoveryService, SchemaDiscoveryService>();
         services.AddScoped<IMaterialFamilyRepository, MaterialFamilyRepository>();
         services.AddScoped<IProductRepository, ProductRepository>();
-        services.AddScoped<IProductEnrichedRepository, ProductEnrichedRepository>();
         services.AddScoped<ISemanticProductRepository, SemanticProductRepository>();
 
         // Core services

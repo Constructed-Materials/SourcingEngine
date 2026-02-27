@@ -331,7 +331,6 @@ public class BomExtractionLambdaStack : Stack
             SecurityGroups = lambdaSg != null ? new[] { lambdaSg } : null,
             Environment = new Dictionary<string, string>
             {
-                ["Database__MaxConcurrentSchemaQueries"] = "5",
                 ["SemanticSearch__Enabled"] = "true",
                 ["SemanticSearch__MatchCount"] = "5",
                 ["SemanticSearch__SimilarityThreshold"] = "0.4",

@@ -5,6 +5,26 @@
 
 ---
 
+## 🛑 CRITICAL: PUBLIC SCHEMA ONLY FOR APPLICATION CODE
+
+> **All application runtime queries (search, embedding, enrichment) MUST target `public.*` tables only.**
+> Non-public vendor schemas (e.g., `kawneer.*`, `sto.*`, `boehmers.*`) are for **data curation/staging only**
+> and MUST NOT be queried by the search engine at runtime.
+
+**Allowed runtime tables:**
+- `public.products` — product catalog
+- `public.vendors` — vendor/manufacturer info  
+- `public.product_knowledge` — description, use_cases, specifications
+- `public.cm_master_materials` — material family backbone
+
+**NEVER** use `information_schema.tables` to discover schemas dynamically at runtime.  
+**NEVER** query `{vendor}.products_enriched` or any non-public schema from application code.
+
+Enrichment data (description, use_cases, specifications) is sourced from `public.product_knowledge`,
+which is already joined in the semantic search query.
+
+---
+
 ## 🎯 THE BACKBONE: cm_master_materials
 
 > **In DEV database, the backbone table is `cm_master_materials`**  

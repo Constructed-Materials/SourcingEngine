@@ -26,46 +26,28 @@ public record ProductMatch
     public required string ModelName { get; init; }
     
     /// <summary>
-    /// Model code from vendor schema
-    /// </summary>
-    [JsonPropertyName("modelCode")]
-    public string? ModelCode { get; init; }
-    
-    /// <summary>
     /// CSI section code - e.g., "042200"
     /// </summary>
     [JsonPropertyName("csiCode")]
     public string? CsiCode { get; init; }
     
     /// <summary>
-    /// When to use this product
+    /// Product description from public.product_knowledge
     /// </summary>
-    [JsonPropertyName("useWhen")]
-    public string? UseWhen { get; init; }
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
     
     /// <summary>
-    /// Key features as JSON array
+    /// Use cases from public.product_knowledge.use_cases
     /// </summary>
-    [JsonPropertyName("keyFeatures")]
-    public List<string>? KeyFeatures { get; init; }
+    [JsonPropertyName("useCases")]
+    public List<string>? UseCases { get; init; }
     
     /// <summary>
-    /// Technical specifications as JSON object
+    /// Technical specifications from public.product_knowledge.specifications
     /// </summary>
     [JsonPropertyName("technicalSpecs")]
     public Dictionary<string, object>? TechnicalSpecs { get; init; }
-    
-    /// <summary>
-    /// Performance data as JSON object
-    /// </summary>
-    [JsonPropertyName("performanceData")]
-    public Dictionary<string, object>? PerformanceData { get; init; }
-    
-    /// <summary>
-    /// Source schema for this enriched data
-    /// </summary>
-    [JsonPropertyName("sourceSchema")]
-    public string? SourceSchema { get; init; }
 
     /// <summary>
     /// Semantic similarity score (0.0-1.0) from embedding search.

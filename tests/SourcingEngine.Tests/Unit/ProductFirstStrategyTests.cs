@@ -17,7 +17,6 @@ namespace SourcingEngine.Tests.Unit;
 public class ProductFirstStrategyTests
 {
     private readonly Mock<ISemanticProductRepository> _semanticRepoMock;
-    private readonly Mock<IProductEnrichedRepository> _enrichedRepoMock;
     private readonly Mock<IEmbeddingService> _embeddingMock;
     private readonly Mock<IQueryParserService> _queryParserMock;
     private readonly Mock<IQueryEmbeddingTextBuilder> _queryEmbeddingTextBuilderMock;
@@ -29,7 +28,6 @@ public class ProductFirstStrategyTests
     {
         return new ProductFirstStrategy(
             _semanticRepoMock.Object,
-            _enrichedRepoMock.Object,
             _embeddingMock.Object,
             _queryParserMock.Object,
             _queryEmbeddingTextBuilderMock.Object,
@@ -41,7 +39,6 @@ public class ProductFirstStrategyTests
     public ProductFirstStrategyTests()
     {
         _semanticRepoMock = new Mock<ISemanticProductRepository>();
-        _enrichedRepoMock = new Mock<IProductEnrichedRepository>();
         _embeddingMock = new Mock<IEmbeddingService>();
         _queryParserMock = new Mock<IQueryParserService>();
         _queryEmbeddingTextBuilderMock = new Mock<IQueryEmbeddingTextBuilder>();
@@ -58,10 +55,6 @@ public class ProductFirstStrategyTests
         // Default: embedding service returns a valid vector
         _embeddingMock.Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new float[768]);
-
-        // Default: enriched repo returns empty
-        _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(It.IsAny<List<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ProductEnriched>());
 
         // Default: query parser succeeds with basic result
         _queryParserMock.Setup(p => p.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -288,46 +281,37 @@ public class ProductFirstStrategyTests
         Assert.Equal("042200", result.CsiCode);
     }
 
-    // ── Enrichment integration ─────────────────────────────────────
+    // ── Enrichment from public.product_knowledge ───────────────────
 
     [Fact]
-    public async Task ExecuteAsync_EnrichesMatches_WithVendorData()
+    public async Task ExecuteAsync_MapsPublicProductKnowledgeData()
     {
         var productId = Guid.NewGuid();
         var matches = new List<SemanticProductMatch>
         {
-            MakeMatch("Kawneer", "1600UT", id: productId)
+            MakeMatch("Kawneer", "1600UT", id: productId) with
+            {
+                Description = "Commercial storefront system",
+                UseCases = "[\"Storefronts\",\"Curtain walls\"]",
+                SpecificationsJson = "{\"width\":\"4 inch\"}"
+            }
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
                 It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
-        _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(
-                It.Is<List<Guid>>(ids => ids.Contains(productId)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([
-                new ProductEnriched
-                {
-                    ProductId = productId,
-                    UseWhen = "Commercial storefront applications",
-                    ModelCode = "1600UT-STD",
-                    KeyFeaturesJson = "[\"Thermal break\",\"Hurricane rated\"]",
-                    SourceSchema = "kawneer"
-                }
-            ]);
-
         var sut = CreateStrategy();
         var result = await sut.ExecuteAsync(MakeItem("curtain wall"), CancellationToken.None);
 
         var match = Assert.Single(result.Matches);
-        Assert.Equal("Commercial storefront applications", match.UseWhen);
-        Assert.Equal("1600UT-STD", match.ModelCode);
-        Assert.Equal("kawneer", match.SourceSchema);
-        Assert.NotNull(match.KeyFeatures);
-        Assert.Contains("Thermal break", match.KeyFeatures);
+        Assert.Equal("Commercial storefront system", match.Description);
+        Assert.NotNull(match.UseCases);
+        Assert.Contains("Storefronts", match.UseCases);
+        Assert.NotNull(match.TechnicalSpecs);
     }
 
     [Fact]
-    public async Task ExecuteAsync_HandlesPartialEnrichment_Gracefully()
+    public async Task ExecuteAsync_HandlesNullProductKnowledgeData_Gracefully()
     {
         var id1 = Guid.NewGuid();
         var id2 = Guid.NewGuid();
@@ -335,26 +319,20 @@ public class ProductFirstStrategyTests
         var matches = new List<SemanticProductMatch>
         {
             MakeMatch("V1", "M1", id: id1),
-            MakeMatch("V2", "M2", id: id2),
+            MakeMatch("V2", "M2", id: id2) with { Description = "Has a description" },
             MakeMatch("V3", "M3", id: id3),
         };
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
                 It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matches);
 
-        _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(
-                It.IsAny<List<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([
-                new ProductEnriched { ProductId = id2, UseWhen = "Indoor use", SourceSchema = "vendor2" }
-            ]);
-
         var sut = CreateStrategy();
         var result = await sut.ExecuteAsync(MakeItem("query"), CancellationToken.None);
 
         Assert.Equal(3, result.Matches.Count);
-        Assert.Null(result.Matches[0].UseWhen);
-        Assert.Equal("Indoor use", result.Matches[1].UseWhen);
-        Assert.Null(result.Matches[2].UseWhen);
+        Assert.Null(result.Matches[0].Description);
+        Assert.Equal("Has a description", result.Matches[1].Description);
+        Assert.Null(result.Matches[2].Description);
     }
 
     // ── Error handling ─────────────────────────────────────────────
@@ -455,33 +433,25 @@ public class ProductFirstStrategyTests
             sut.ExecuteAsync(MakeItem("query"), cts.Token));
     }
 
-    // ── JSON parsing edge cases (via enrichment) ───────────────────
+    // ── JSON parsing edge cases (via public.product_knowledge) ─────
 
     [Fact]
-    public async Task ExecuteAsync_HandlesInvalidJsonInEnrichedData()
+    public async Task ExecuteAsync_HandlesInvalidJsonInProductKnowledge()
     {
         var productId = Guid.NewGuid();
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
                 It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([MakeMatch("V1", "M1", id: productId)]);
-
-        _enrichedRepoMock.Setup(r => r.GetEnrichedDataAsync(
-                It.IsAny<List<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([
-                new ProductEnriched
-                {
-                    ProductId = productId,
-                    KeyFeaturesJson = "not valid json",
-                    TechnicalSpecsJson = "{broken",
-                    SourceSchema = "test"
-                }
-            ]);
+            .ReturnsAsync([MakeMatch("V1", "M1", id: productId) with
+            {
+                UseCases = "not valid json",
+                SpecificationsJson = "{broken"
+            }]);
 
         var sut = CreateStrategy();
         var result = await sut.ExecuteAsync(MakeItem("test"), CancellationToken.None);
 
         var match = Assert.Single(result.Matches);
-        Assert.Null(match.KeyFeatures);
+        Assert.Null(match.UseCases);
         Assert.Null(match.TechnicalSpecs);
     }
 

@@ -44,7 +44,6 @@ public class QueueMessageSerializationTests
                             ProductId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
                             Vendor = "Oldcastle",
                             ModelName = "Standard CMU",
-                            ModelCode = "CMU-8",
                             SemanticScore = 0.95f,
                         }
                     }
@@ -66,7 +65,6 @@ public class QueueMessageSerializationTests
         Assert.Contains("\"productId\":", json);
         Assert.Contains("\"vendor\":", json);
         Assert.Contains("\"modelName\":", json);
-        Assert.Contains("\"modelCode\":", json);
         Assert.Contains("\"semanticScore\":", json);
 
         // Should NOT contain PascalCase

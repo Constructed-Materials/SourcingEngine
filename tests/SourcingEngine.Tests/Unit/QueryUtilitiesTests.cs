@@ -130,7 +130,7 @@ public class QueryUtilitiesTests
     // ── CreateProductMatch ─────────────────────────────────────────
 
     [Fact]
-    public void CreateProductMatch_WithEnrichment_PopulatesAllFields()
+    public void CreateProductMatch_PopulatesBaseFields()
     {
         var product = new SourcingEngine.Core.Models.Product
         {
@@ -139,33 +139,17 @@ public class QueryUtilitiesTests
             ModelName = "1600UT",
             CsiSectionCode = "084113"
         };
-        var enriched = new SourcingEngine.Core.Models.ProductEnriched
-        {
-            ProductId = product.ProductId,
-            ModelCode = "1600UT-STD",
-            UseWhen = "Commercial applications",
-            KeyFeaturesJson = "[\"Thermal break\"]",
-            TechnicalSpecsJson = "{\"width\":\"4 inch\"}",
-            PerformanceDataJson = "{\"fire_rating\":\"1hr\"}",
-            SourceSchema = "kawneer"
-        };
 
-        var match = QueryUtilities.CreateProductMatch(product, enriched);
+        var match = QueryUtilities.CreateProductMatch(product);
 
         Assert.Equal(product.ProductId, match.ProductId);
         Assert.Equal("Kawneer", match.Vendor);
         Assert.Equal("1600UT", match.ModelName);
-        Assert.Equal("1600UT-STD", match.ModelCode);
         Assert.Equal("084113", match.CsiCode);
-        Assert.Equal("Commercial applications", match.UseWhen);
-        Assert.NotNull(match.KeyFeatures);
-        Assert.NotNull(match.TechnicalSpecs);
-        Assert.NotNull(match.PerformanceData);
-        Assert.Equal("kawneer", match.SourceSchema);
     }
 
     [Fact]
-    public void CreateProductMatch_WithoutEnrichment_HasNullOptionalFields()
+    public void CreateProductMatch_HasNullOptionalFields()
     {
         var product = new SourcingEngine.Core.Models.Product
         {
@@ -175,12 +159,11 @@ public class QueryUtilitiesTests
             CsiSectionCode = null
         };
 
-        var match = QueryUtilities.CreateProductMatch(product, enriched: null);
+        var match = QueryUtilities.CreateProductMatch(product);
 
         Assert.Equal("Acme", match.Vendor);
-        Assert.Null(match.UseWhen);
-        Assert.Null(match.KeyFeatures);
-        Assert.Null(match.ModelCode);
-        Assert.Null(match.SourceSchema);
+        Assert.Null(match.Description);
+        Assert.Null(match.UseCases);
+        Assert.Null(match.TechnicalSpecs);
     }
 }

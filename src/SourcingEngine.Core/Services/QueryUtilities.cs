@@ -98,24 +98,18 @@ public static class QueryUtilities
     }
 
     /// <summary>
-    /// Build a <see cref="ProductMatch"/> from a base <see cref="Product"/> and optional enrichment.
+    /// Build a <see cref="ProductMatch"/> from a base <see cref="Product"/>.
+    /// Enrichment data (description, use_cases, specifications) comes from public.product_knowledge
+    /// via the semantic search results, not from vendor schemas.
     /// </summary>
-    public static ProductMatch CreateProductMatch(
-        Product product,
-        ProductEnriched? enriched)
+    public static ProductMatch CreateProductMatch(Product product)
     {
         return new ProductMatch
         {
             ProductId = product.ProductId,
             Vendor = product.VendorName,
             ModelName = product.ModelName,
-            ModelCode = enriched?.ModelCode,
-            CsiCode = product.CsiSectionCode,
-            UseWhen = enriched?.UseWhen,
-            KeyFeatures = ParseJsonArray(enriched?.KeyFeaturesJson),
-            TechnicalSpecs = ParseJsonObject(enriched?.TechnicalSpecsJson),
-            PerformanceData = ParseJsonObject(enriched?.PerformanceDataJson),
-            SourceSchema = enriched?.SourceSchema
+            CsiCode = product.CsiSectionCode
         };
     }
 }

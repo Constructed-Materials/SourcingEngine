@@ -199,7 +199,6 @@ Environment variables (set by CDK stack):
 | Variable | Description | Default |
 |---|---|---|
 | `Database__ConnectionString` | Supabase PostgreSQL connection string | — |
-| `Database__MaxConcurrentSchemaQueries` | Parallel vendor schema queries | `5` |
 | `SemanticSearch__Enabled` | Enable vector similarity search | `true` |
 | `SemanticSearch__DefaultMode` | Search mode | `FamilyFirst` |
 | `SemanticSearch__MatchCount` | Max semantic matches to return | `10` |

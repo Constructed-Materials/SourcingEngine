@@ -198,8 +198,8 @@ public class SemanticProductSearchTests
         foreach (var match in result.Matches.Take(5))
         {
             _output.WriteLine($"  {match.Vendor} - {match.ModelName} [CSI:{match.CsiCode}] (score: {match.SemanticScore:F4})");
-            _output.WriteLine($"    UseWhen: {match.UseWhen ?? "(none)"}");
-            _output.WriteLine($"    Schema: {match.SourceSchema ?? "(none)"}");
+            _output.WriteLine($"    Description: {match.Description ?? "(none)"}");
+            _output.WriteLine($"    TechnicalSpecs: {(match.TechnicalSpecs != null ? string.Join(", ", match.TechnicalSpecs.Select(kv => $"{kv.Key}={kv.Value}")) : "(none)")}");
         }
 
         Assert.True(result.MatchCount >= 1,

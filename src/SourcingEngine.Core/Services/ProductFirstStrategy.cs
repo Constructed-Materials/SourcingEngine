@@ -15,7 +15,6 @@ namespace SourcingEngine.Core.Services;
 public class ProductFirstStrategy : ISearchStrategy
 {
     private readonly ISemanticProductRepository _semanticProductRepository;
-    private readonly IProductEnrichedRepository _productEnrichedRepository;
     private readonly IEmbeddingService _embeddingService;
     private readonly IQueryParserService _queryParserService;
     private readonly IQueryEmbeddingTextBuilder _queryEmbeddingTextBuilder;
@@ -25,7 +24,6 @@ public class ProductFirstStrategy : ISearchStrategy
 
     public ProductFirstStrategy(
         ISemanticProductRepository semanticProductRepository,
-        IProductEnrichedRepository productEnrichedRepository,
         IEmbeddingService embeddingService,
         IQueryParserService queryParserService,
         IQueryEmbeddingTextBuilder queryEmbeddingTextBuilder,
@@ -34,7 +32,6 @@ public class ProductFirstStrategy : ISearchStrategy
         ILogger<ProductFirstStrategy> logger)
     {
         _semanticProductRepository = semanticProductRepository;
-        _productEnrichedRepository = productEnrichedRepository;
         _embeddingService = embeddingService;
         _queryParserService = queryParserService;
         _queryEmbeddingTextBuilder = queryEmbeddingTextBuilder;
@@ -120,33 +117,19 @@ public class ProductFirstStrategy : ISearchStrategy
             var csiCode = semanticMatches
                 .FirstOrDefault(sm => !string.IsNullOrWhiteSpace(sm.CsiCode))?.CsiCode;
 
-            // Step 9: Enrich with vendor-specific data
-            var productIds = semanticMatches.Select(sm => sm.ProductId).ToList();
-            var enrichedData = await _productEnrichedRepository.GetEnrichedDataAsync(productIds, cancellationToken);
-            var enrichedLookup = enrichedData.ToDictionary(e => e.ProductId, e => e);
-
-            _logger.LogDebug("Enriched {EnrichedCount}/{TotalCount} semantic matches with vendor data",
-                enrichedData.Count, semanticMatches.Count);
-
-            // Step 10: Convert to ProductMatch
-            var matches = semanticMatches.Select(sm =>
+            // Step 9: Convert to ProductMatch using public.product_knowledge data
+            // (description, use_cases, specifications already returned by semantic search)
+            var matches = semanticMatches.Select(sm => new ProductMatch
             {
-                enrichedLookup.TryGetValue(sm.ProductId, out var enriched);
-                return new ProductMatch
-                {
-                    ProductId = sm.ProductId,
-                    Vendor = sm.VendorName,
-                    ModelName = sm.ModelName,
-                    ModelCode = enriched?.ModelCode,
-                    CsiCode = sm.CsiCode,
-                    UseWhen = enriched?.UseWhen,
-                    KeyFeatures = QueryUtilities.ParseJsonArray(enriched?.KeyFeaturesJson),
-                    TechnicalSpecs = QueryUtilities.ParseJsonObject(enriched?.TechnicalSpecsJson),
-                    PerformanceData = QueryUtilities.ParseJsonObject(enriched?.PerformanceDataJson),
-                    SourceSchema = enriched?.SourceSchema,
-                    SemanticScore = sm.Similarity,
-                    FinalScore = sm.FinalScore
-                };
+                ProductId = sm.ProductId,
+                Vendor = sm.VendorName,
+                ModelName = sm.ModelName,
+                CsiCode = sm.CsiCode,
+                Description = sm.Description,
+                UseCases = QueryUtilities.ParseJsonArray(sm.UseCases),
+                TechnicalSpecs = QueryUtilities.ParseJsonObject(sm.SpecificationsJson),
+                SemanticScore = sm.Similarity,
+                FinalScore = sm.FinalScore
             }).ToList();
 
             return new SearchStrategyResult

@@ -116,7 +116,6 @@ public class FunctionTests
             ProductId = Guid.NewGuid(),
             Vendor = $"vendor-{i}",
             ModelName = $"model-{i}",
-            ModelCode = $"code-{i}",
         }).ToList();
 
         return new BomItemSearchResult

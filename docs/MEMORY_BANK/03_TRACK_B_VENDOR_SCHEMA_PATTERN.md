@@ -4,6 +4,11 @@
 **Reference:** Kawneer schema in DEV database  
 **Rule:** ALL vendors must follow this structure
 
+> **⚠️ IMPORTANT:** Vendor schemas are for **data curation and staging only**.
+> The application code (search engine, embedding generation, Lambda functions) **NEVER** queries
+> vendor schemas at runtime. Once data is ready, it is distributed to `public.product_knowledge`
+> for use by the search pipeline. See `02_DATABASE_RULES.md` for the full schema restriction rules.
+
 ---
 
 ## 🎯 THE KAWNEER PATTERN (REFERENCE)

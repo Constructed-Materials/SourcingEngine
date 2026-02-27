@@ -12,25 +12,28 @@ This is a .NET 8 **construction materials marketplace** search engine connecting
 **Core Layers:**
 - `SourcingEngine.Console` → CLI entry point, DI configuration
 - `SourcingEngine.Core` → Domain models, services, repository interfaces
-- `SourcingEngine.Data` → Npgsql implementations, parallel vendor queries
+- `SourcingEngine.Data` → Npgsql implementations, public-schema queries
+
+## ⚠️ Schema Rules (CRITICAL)
+
+**Public Schema Only:** All runtime queries (search, embedding, enrichment) MUST target `public.*` tables only:
+- `public.products` — product catalog
+- `public.vendors` — vendor/manufacturer info
+- `public.product_knowledge` — description, use_cases, specifications (enrichment data)
+- `public.cm_master_materials` — material family backbone
+
+**NEVER** query non-public vendor schemas (e.g., `kawneer.*`, `sto.*`, `boehmers.*`) from application code. These are staging/data-curation schemas only — unstable and not for runtime use.
+
+**NEVER** use `information_schema.tables` to discover schemas dynamically at runtime.
+
+**Enrichment data** (description, use_cases, specifications) comes from `public.product_knowledge`, which is already joined in the semantic search query.
 
 ## Database Rules
 
 **The Backbone:** `cm_master_materials.family_label` (119 families) is THE central FK. Every product links here.
 
-**Vendor Schema Pattern** (follow Kawneer as reference):
-```
-{vendor}.products_enriched     ← Main table WITH intelligence fields
-{vendor}.assembly_knowledge    ← Component options
-{vendor}.product_alternatives  ← Upsell/cross-sell
-{vendor}.product_finishes      ← Colors/coatings
-```
-
-**Required Intelligence Fields** in `products_enriched`:
-- `use_when` - When to recommend this product
-- `dont_use_when` - When NOT to use
-- `best_for` - Ideal applications
-- `not_recommended_for` - Avoid scenarios
+**Vendor Schemas (data curation only — NOT queried at runtime):**
+Vendor schemas like `kawneer.*` exist for data staging and curation. Once data is ready, it is distributed to `public.product_knowledge`. The application code never queries these schemas directly.
 
 **Safety Protocol:** NEVER delete source tables during migrations. Use INSERT...SELECT, backup first, verify counts.
 
@@ -58,8 +61,6 @@ dotnet test --filter "Category=Acceptance"     # E2E acceptance tests
 ## Code Patterns
 
 **Repository Pattern:** Interfaces in `Core/Repositories/`, implementations in `Data/Repositories/`. Always inject via interface.
-
-**Parallel Queries:** Use `Task.WhenAll` for multi-vendor schema queries (see `ProductEnrichedRepository`).
 
 **Adding Synonyms:** Edit `SynonymExpander.SynonymDictionary` in [SynonymExpander.cs](src/SourcingEngine.Core/Services/SynonymExpander.cs).
 

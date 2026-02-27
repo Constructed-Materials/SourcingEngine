@@ -146,29 +146,23 @@ public class ProductMatchDto
     [JsonPropertyName("modelName")]
     public string ModelName { get; set; } = string.Empty;
 
-    [JsonPropertyName("modelCode")]
-    public string? ModelCode { get; set; }
-
     [JsonPropertyName("csiCode")]
     public string? CsiCode { get; set; }
 
-    [JsonPropertyName("useWhen")]
-    public string? UseWhen { get; set; }
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
 
-    [JsonPropertyName("keyFeatures")]
-    public List<string>? KeyFeatures { get; set; }
+    [JsonPropertyName("useCases")]
+    public List<string>? UseCases { get; set; }
+
+    [JsonPropertyName("technicalSpecs")]
+    public Dictionary<string, object>? TechnicalSpecs { get; set; }
 
     [JsonPropertyName("semanticScore")]
     public float? SemanticScore { get; set; }
 
     [JsonPropertyName("finalScore")]
     public float? FinalScore { get; set; }
-
-    [JsonPropertyName("technicalSpecs")]
-    public Dictionary<string, object>? TechnicalSpecs { get; set; }
-
-    [JsonPropertyName("sourceSchema")]
-    public string? SourceSchema { get; set; }
 }
 
 /// <summary>
