@@ -484,4 +484,62 @@ public class ProductFirstStrategyTests
         Assert.Null(match.KeyFeatures);
         Assert.Null(match.TechnicalSpecs);
     }
+
+    // ── Post-rerank threshold filter (Step 6b) ─────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_PostRerankFilter_RemovesMatchesBelowThreshold()
+    {
+        // Arrange: threshold = 0.5; re-ranker returns one above and one below
+        _settings.SimilarityThreshold = 0.5f;
+
+        var aboveId = Guid.NewGuid();
+        var belowId = Guid.NewGuid();
+        var semanticMatches = new List<SemanticProductMatch>
+        {
+            MakeMatch("V1", "Good", id: aboveId) with { FinalScore = 0.75f },
+            MakeMatch("V2", "Weak", id: belowId) with { FinalScore = 0.35f }
+        };
+
+        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(semanticMatches);
+
+        // Re-ranker passes through (already has FinalScore set)
+        _specMatchReRankerMock.Setup(r => r.ReRank(It.IsAny<List<SemanticProductMatch>>(), It.IsAny<TechnicalSpecs?>()))
+            .Returns((List<SemanticProductMatch> m, TechnicalSpecs? _) => m);
+
+        var sut = CreateStrategy();
+        var result = await sut.ExecuteAsync(MakeItem("test item"), CancellationToken.None);
+
+        // Only the match above threshold should remain
+        Assert.Single(result.Matches);
+        Assert.Equal("Good", result.Matches[0].ModelName);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PostRerankFilter_UsesSimilarityWhenFinalScoreNull()
+    {
+        _settings.SimilarityThreshold = 0.5f;
+
+        var id = Guid.NewGuid();
+        var semanticMatches = new List<SemanticProductMatch>
+        {
+            MakeMatch("V1", "NoFinalScore", similarity: 0.7f, id: id)
+            // FinalScore is null by default
+        };
+
+        _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
+                It.IsAny<float[]>(), It.IsAny<SearchFilters?>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(semanticMatches);
+
+        _specMatchReRankerMock.Setup(r => r.ReRank(It.IsAny<List<SemanticProductMatch>>(), It.IsAny<TechnicalSpecs?>()))
+            .Returns((List<SemanticProductMatch> m, TechnicalSpecs? _) => m);
+
+        var sut = CreateStrategy();
+        var result = await sut.ExecuteAsync(MakeItem("test item"), CancellationToken.None);
+
+        // Similarity 0.7 > threshold 0.5, should keep it
+        Assert.Single(result.Matches);
+    }
 }

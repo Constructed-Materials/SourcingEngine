@@ -50,6 +50,9 @@ public class ProductFirstStrategy : ISearchStrategy
 
         try
         {
+            _logger.LogInformation(
+                "Semantic search settings - Threshold: {Threshold}, MatchCount: {MatchCount}, SimilarityThreshold: {SimilarityThreshold}",
+                _settings.SimilarityThreshold, _settings.MatchCount, _settings.SimilarityThreshold);
             // Step 1: LLM query parsing (mandatory) — extract family, dimensions, attributes
             var searchText = item.Spec;
             if (string.IsNullOrWhiteSpace(searchText))
@@ -90,9 +93,20 @@ public class ProductFirstStrategy : ISearchStrategy
                 semanticMatches.Count, _settings.SimilarityThreshold);
 
             // Step 6: Post-retrieval specification re-ranking
-            if (parsedQuery.Success)
+            semanticMatches = _specMatchReRanker.ReRank(semanticMatches,
+                parsedQuery.Success ? parsedQuery.TechnicalSpecs : null);
+
+            // Step 6b: Filter out results whose FinalScore dropped below threshold after re-ranking
+            var preFilterCount = semanticMatches.Count;
+            semanticMatches = semanticMatches
+                .Where(sm => (sm.FinalScore ?? sm.Similarity) >= _settings.SimilarityThreshold)
+                .ToList();
+
+            if (semanticMatches.Count < preFilterCount)
             {
-                semanticMatches = _specMatchReRanker.ReRank(semanticMatches, parsedQuery.TechnicalSpecs);
+                _logger.LogInformation(
+                    "Post-rerank threshold filter removed {Removed} results (threshold={Threshold})",
+                    preFilterCount - semanticMatches.Count, _settings.SimilarityThreshold);
             }
 
             // Step 7: Derive family label from most common result

@@ -21,8 +21,8 @@ public class SpecMatchReRankerTests
         var settings = Options.Create(new SemanticSearchSettings
         {
             EnableSpecReRanking = true,
-            SemanticWeight = 0.6f,
-            SpecMatchWeight = 0.4f
+            ReRankerSemanticWeight = 0.6f,
+            ReRankerSpecWeight = 0.4f
         });
         var logger = new Mock<ILogger<SpecMatchReRanker>>();
         _sut = new SpecMatchReRanker(settings, logger.Object);
@@ -49,7 +49,7 @@ public class SpecMatchReRankerTests
     // ── ReRank — disabled / no specs ───────────────────────────────
 
     [Fact]
-    public void ReRank_Disabled_ReturnsOriginalOrder()
+    public void ReRank_Disabled_SetsFinalScoreToSimilarity()
     {
         var settings = Options.Create(new SemanticSearchSettings
         {
@@ -60,23 +60,33 @@ public class SpecMatchReRankerTests
         var matches = MakeMatches();
         var result = sut.ReRank(matches, new TechnicalSpecs { Specs = { ["width"] = "8 in" } });
 
-        Assert.Same(matches, result); // returns same reference
+        Assert.Equal(matches.Count, result.Count);
+        Assert.All(result, m => Assert.Equal(m.Similarity, m.FinalScore));
     }
 
     [Fact]
-    public void ReRank_NullSpecs_ReturnsOriginalOrder()
+    public void ReRank_NullSpecs_SetsFinalScoreToSimilarity()
     {
         var matches = MakeMatches();
         var result = _sut.ReRank(matches, null);
-        Assert.Same(matches, result);
+        Assert.Equal(matches.Count, result.Count);
+        Assert.All(result, m => Assert.Equal(m.Similarity, m.FinalScore));
     }
 
     [Fact]
-    public void ReRank_EmptySpecs_ReturnsOriginalOrder()
+    public void ReRank_EmptySpecs_SetsFinalScoreToSimilarity()
     {
         var matches = MakeMatches();
         var result = _sut.ReRank(matches, new TechnicalSpecs());
-        Assert.Same(matches, result);
+        Assert.Equal(matches.Count, result.Count);
+        Assert.All(result, m => Assert.Equal(m.Similarity, m.FinalScore));
+    }
+
+    [Fact]
+    public void ReRank_EmptyMatchList_ReturnsEmpty()
+    {
+        var result = _sut.ReRank(new List<SemanticProductMatch>(), new TechnicalSpecs { Specs = { ["width"] = "8 in" } });
+        Assert.Empty(result);
     }
 
     // ── ReRank — CMU 8-inch scenario (the original bug) ────────────

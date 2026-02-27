@@ -45,17 +45,31 @@ public class SpecMatchReRanker : ISpecMatchReRanker
         List<SemanticProductMatch> semanticMatches,
         TechnicalSpecs? queryTechnicalSpecs)
     {
-        // If re-ranking is disabled or no query specs to match against, return as-is
+        if (semanticMatches.Count == 0)
+            return semanticMatches;
+
+        // If re-ranking is disabled or no query specs to match against,
+        // still set FinalScore = Similarity so it's never null
         if (!_settings.EnableSpecReRanking ||
             queryTechnicalSpecs == null ||
-            queryTechnicalSpecs.Specs.Count == 0 ||
-            semanticMatches.Count == 0)
+            queryTechnicalSpecs.Specs.Count == 0)
         {
-            return semanticMatches;
+            return semanticMatches
+                .Select(m => m with { FinalScore = m.Similarity })
+                .ToList();
         }
 
-        var alpha = _settings.SemanticWeight;
-        var beta = _settings.SpecMatchWeight;
+        var alpha = _settings.ReRankerSemanticWeight;
+        var beta = _settings.ReRankerSpecWeight;
+
+        // Normalize weights so they always sum to 1.0, preventing FinalScore > 1.0
+        // even if config has mismatched values (e.g., legacy SemanticWeight: 1.0)
+        var weightSum = alpha + beta;
+        if (weightSum > 0 && Math.Abs(weightSum - 1.0f) > 0.001f)
+        {
+            alpha /= weightSum;
+            beta /= weightSum;
+        }
 
         _logger.LogDebug(
             "Re-ranking {Count} results with {SpecCount} query specs (α={Alpha}, β={Beta})",

@@ -29,14 +29,14 @@ public class SemanticSearchSettings
     public bool EnableSpecReRanking { get; set; } = true;
 
     /// <summary>
-    /// Weight for the semantic (cosine similarity) component in the blended score.
-    /// Must sum to 1.0 with <see cref="SpecMatchWeight"/>.
+    /// Weight for the semantic (cosine similarity) component in the re-ranker blended score.
+    /// Must sum to 1.0 with <see cref="ReRankerSpecWeight"/>.
     /// </summary>
-    public float SemanticWeight { get; set; } = 0.6f;
+    public float ReRankerSemanticWeight { get; set; } = 0.6f;
 
     /// <summary>
-    /// Weight for the specification match component in the blended score.
-    /// Must sum to 1.0 with <see cref="SemanticWeight"/>.
+    /// Weight for the specification match component in the re-ranker blended score.
+    /// Must sum to 1.0 with <see cref="ReRankerSemanticWeight"/>.
     /// </summary>
-    public float SpecMatchWeight { get; set; } = 0.4f;
+    public float ReRankerSpecWeight { get; set; } = 0.4f;
 }

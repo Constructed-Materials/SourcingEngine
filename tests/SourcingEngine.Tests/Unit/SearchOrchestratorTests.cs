@@ -226,6 +226,53 @@ public class SearchOrchestratorTests
         Assert.True(result.TotalExecutionTimeMs >= 0);
     }
 
+    // ── Deduplication ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task SearchAsync_DeduplicatesBomItems_ByName()
+    {
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "Column C5", Spec = "Column type C5", Quantity = 2 },
+            new BomLineItem { BomItem = "Column C5", Spec = "Column type C5", Quantity = 2 },
+            new BomLineItem { BomItem = "rebar", Spec = "#4 rebar", Quantity = 50 });
+
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
+
+        // Should only have 2 unique items, not 3
+        Assert.Equal(2, result.Items.Count);
+        Assert.Contains(result.Warnings, w => w.Contains("duplicate", StringComparison.OrdinalIgnoreCase));
+        _strategyMock.Verify(s => s.ExecuteAsync(
+            It.IsAny<BomLineItem>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task SearchAsync_DeduplicatesBomItems_CaseInsensitive()
+    {
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "Column C5", Spec = "Column type C5" },
+            new BomLineItem { BomItem = "column c5", Spec = "Column type C5" });
+
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
+
+        Assert.Single(result.Items);
+    }
+
+    [Fact]
+    public async Task SearchAsync_NoDuplicates_ProcessesAll()
+    {
+        var request = MakeRequest(
+            new BomLineItem { BomItem = "cmu", Spec = "8 inch cmu" },
+            new BomLineItem { BomItem = "rebar", Spec = "#4 rebar" });
+
+        var sut = CreateOrchestrator();
+        var result = await sut.SearchAsync(request);
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("duplicate", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────
 
     private static SourcingRequest MakeRequest(params BomLineItem[] items)

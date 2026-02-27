@@ -150,6 +150,7 @@ public class ProductEnrichedRepository : IProductEnrichedRepository
             // Log warning but don't throw - return partial results
             _logger.LogWarning(ex, "Failed to query schema {Schema} - continuing with partial results", 
                 schemaName);
+                throw;
         }
 
         return results;

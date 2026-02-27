@@ -44,7 +44,21 @@ public class SearchOrchestrator : ISearchOrchestrator
         var itemResults = new List<BomItemSearchResult>();
         var warnings = new List<string>(extraction.Warnings);
 
-        foreach (var item in extraction.Items)
+        // Deduplicate BOM items by name (case-insensitive) to prevent the same item
+        // from appearing in both result and zero-result queues due to duplicate entries
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var uniqueItems = extraction.Items.Where(i => seen.Add(i.BomItem)).ToList();
+
+        if (uniqueItems.Count < extraction.Items.Count)
+        {
+            var dupeCount = extraction.Items.Count - uniqueItems.Count;
+            _logger.LogInformation(
+                "Deduplicated {DuplicateCount} duplicate BOM item(s) from {OriginalCount} items",
+                dupeCount, extraction.Items.Count);
+            warnings.Add($"Removed {dupeCount} duplicate BOM item(s)");
+        }
+
+        foreach (var item in uniqueItems)
         {
             try
             {
