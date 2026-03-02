@@ -33,16 +33,19 @@ public class SearchAcceptanceTests
         var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
         var bomLineItem = new BomLineItem 
         { 
-            BomItem = "Private Terrace Paving",
-            Spec = "Calacatta Pavers, Sandblasted, 30mm", 
+            BomItem = "Main Facade Cladding",
+            Description = "Granite (Silver Grey), Flamed, 30mm thickness", 
+            Category = "Exterior Shell",
+            Uom = "sq ft",
+            Certifications = new List<string> { "LEED v5" , "ANSI/NSI 373"},
             AdditionalData = new Dictionary<string, object?>
             {
-                ["section"] = "Penthouse",
-                ["uom"] = "sq ft",
-                ["waste_factor"] = 12,
-                ["total_qty_w_waste"] = 1344,
-                ["origin"] = "Italy",
-                ["certifications"] = "LEED v5"
+                ["origin"] = "Norway"
+            }, 
+            TechnicalSpecs = new List<TechnicalSpecItem>
+            {
+                new() { Name = "thickness", Value = 30, Uom = "mm" },
+                new() { Name = "weight_per_area", Value = 18.5, Uom = "lbs/sq ft" },
             }
         };
         var request = new SourcingRequest
@@ -99,7 +102,7 @@ public class SearchAcceptanceTests
     {
         using var scope = _fixture.CreateScope();
         var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
-        var bomLineItem =  new BomLineItem { BomItem = "Masonry block", Spec = "20cm masonry block (CMU)" };
+        var bomLineItem =  new BomLineItem { BomItem = "Masonry block", Description = "8 inch masonry block (CMU)" };
         var request = new SourcingRequest
         {
             ExtractionResult = new ExtractionResultMessage

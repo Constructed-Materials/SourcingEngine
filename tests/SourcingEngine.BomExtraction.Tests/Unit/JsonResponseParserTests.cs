@@ -16,8 +16,8 @@ public class JsonResponseParserTests
     {
         var json = """
             [
-                {"bom_item": "Masonry Block", "spec": "8 inch CMU Block", "quantity": 1200, "additional_data": {"section": "Masonry", "uom": "EA"}},
-                {"bom_item": "Rebar", "spec": "#5 Rebar 20ft", "quantity": 350, "additional_data": {"uom": "EA"}}
+                {"bom_item": "Masonry Block", "description": "8 inch CMU Block", "quantity": 1200, "additional_data": {"unit_price": 3.50}, "category": "Masonry", "uom": "EA"},
+                {"bom_item": "Rebar", "description": "#5 Rebar 20ft", "quantity": 350, "additional_data": {}, "uom": "EA"}
             ]
             """;
 
@@ -25,9 +25,9 @@ public class JsonResponseParserTests
 
         Assert.Equal(2, items.Count);
         Assert.Equal("Masonry Block", items[0].BomItem);
-        Assert.Equal("8 inch CMU Block", items[0].Spec);
+        Assert.Equal("8 inch CMU Block", items[0].Description);
         Assert.Equal(1200, items[0].Quantity);
-        Assert.Equal("Masonry", items[0].AdditionalData["section"]?.ToString());
+        Assert.Equal("Masonry", items[0].Category);
         Assert.Equal("Rebar", items[1].BomItem);
     }
 
@@ -57,7 +57,7 @@ public class JsonResponseParserTests
     {
         var json = """
             ```
-            [{"bom_item": "Lumber", "spec": "2x4x8 SPF", "quantity": 100}]
+            [{"bom_item": "Lumber", "description": "2x4x8 SPF", "quantity": 100}]
             ```
             """;
 
@@ -75,7 +75,7 @@ public class JsonResponseParserTests
     public void Parse_WrapperObjectWithItems_ReturnsItems()
     {
         var json = """
-            {"items": [{"bom_item": "Plywood", "spec": "3/4 CDX 4x8", "quantity": 200}]}
+            {"items": [{"bom_item": "Plywood", "description": "3/4 CDX 4x8", "quantity": 200}]}
             """;
 
         var items = _parser.Parse(json);
@@ -92,7 +92,7 @@ public class JsonResponseParserTests
     public void Parse_JsonWithTrailingCommentary_ReturnsItems()
     {
         var json = """
-            [{"bom_item": "Mortar", "spec": "Type S Mortar", "quantity": 150}]
+            [{"bom_item": "Mortar", "description": "Type S Mortar", "quantity": 150}]
 
             Note: I extracted all items from the document.
             """;
@@ -144,7 +144,7 @@ public class JsonResponseParserTests
     public void Parse_CamelCaseKeys_ReturnsItems()
     {
         var json = """
-            [{"bomItem": "Stucco", "spec": "3 coat stucco system", "quantity": 500, "additionalData": {"uom": "SF"}}]
+            [{"bomItem": "Stucco", "description": "3 coat stucco system", "quantity": 500, "additionalData": {"uom": "SF"}}]
             """;
 
         var items = _parser.Parse(json);
@@ -161,7 +161,7 @@ public class JsonResponseParserTests
     [Fact]
     public void Parse_NullQuantity_ReturnsNullQuantity()
     {
-        var json = """[{"bom_item": "Sealant", "spec": "Polyurethane sealant", "quantity": null}]""";
+        var json = """[{"bom_item": "Sealant", "description": "Polyurethane sealant", "quantity": null}]""";
 
         var items = _parser.Parse(json);
 
@@ -172,7 +172,7 @@ public class JsonResponseParserTests
     [Fact]
     public void Parse_MissingQuantity_ReturnsNullQuantity()
     {
-        var json = """[{"bom_item": "Sealant", "spec": "Polyurethane sealant"}]""";
+        var json = """[{"bom_item": "Sealant", "description": "Polyurethane sealant"}]""";
 
         var items = _parser.Parse(json);
 
@@ -189,9 +189,9 @@ public class JsonResponseParserTests
     {
         var json = """
             [
-                {"bom_item": "Valid Item", "spec": "Valid spec"},
-                {"bom_item": "", "spec": "Missing bom_item"},
-                {"spec": "Also missing bom_item"}
+                {"bom_item": "Valid Item", "description": "Valid description"},
+                {"bom_item": "", "description": "Missing bom_item"},
+                {"description": "Also missing bom_item"}
             ]
             """;
 
@@ -206,8 +206,8 @@ public class JsonResponseParserTests
     {
         var json = """
             [
-                {"bom_item": "Valid Item", "spec": "Has spec"},
-                {"bom_item": "No Spec Item", "spec": ""}
+                {"bom_item": "Valid Item", "description": "Has description"},
+                {"bom_item": "No Description Item", "description": ""}
             ]
             """;
 
@@ -255,11 +255,9 @@ public class JsonResponseParserTests
         var json = """
             [{
                 "bom_item": "CMU Block",
-                "spec": "8 inch CMU Block",
+                "description": "8 inch CMU Block",
                 "quantity": 1200,
                 "additional_data": {
-                    "section": "Masonry",
-                    "uom": "EA",
                     "unit_price": 3.50,
                     "extended_total": 4200.00,
                     "notes": "Load-bearing walls"
@@ -271,16 +269,15 @@ public class JsonResponseParserTests
 
         Assert.Single(items);
         var data = items[0].AdditionalData;
-        Assert.Equal(5, data.Count);
-        Assert.Equal("Masonry", data["section"]?.ToString());
+        Assert.Equal(2, data.Count);
         Assert.Equal(3.5, Convert.ToDouble(data["unit_price"]));
-        Assert.Equal("Load-bearing walls", data["notes"]?.ToString());
+        Assert.Equal("Load-bearing walls", items[0].Notes);
     }
 
     [Fact]
     public void Parse_MissingAdditionalData_ReturnsEmptyDict()
     {
-        var json = """[{"bom_item": "Nails", "spec": "16d Common Nails"}]""";
+        var json = """[{"bom_item": "Nails", "description": "16d Common Nails"}]""";
 
         var items = _parser.Parse(json);
 
@@ -295,7 +292,7 @@ public class JsonResponseParserTests
     [Fact]
     public void Parse_QuantityAsString_ParsedCorrectly()
     {
-        var json = """[{"bom_item": "Lumber", "spec": "2x4 SPF", "quantity": "800"}]""";
+        var json = """[{"bom_item": "Lumber", "description": "2x4 SPF", "quantity": "800"}]""";
 
         var items = _parser.Parse(json);
 

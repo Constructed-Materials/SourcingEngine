@@ -98,9 +98,9 @@ public class SearchOrchestratorTests
     public async Task SearchAsync_IteratesAllBomItems()
     {
         var request = MakeRequest(
-            new BomLineItem { BomItem = "cmu block", Spec = "8 inch cmu block" },
-            new BomLineItem { BomItem = "rebar", Spec = "#4 rebar" },
-            new BomLineItem { BomItem = "stucco", Spec = "5/8 stucco" });
+            new BomLineItem { BomItem = "cmu block", Description = "8 inch cmu block" },
+            new BomLineItem { BomItem = "rebar", Description = "#4 rebar" },
+            new BomLineItem { BomItem = "stucco", Description = "5/8 stucco" });
 
         var sut = CreateOrchestrator();
         var result = await sut.SearchAsync(request);
@@ -114,7 +114,7 @@ public class SearchOrchestratorTests
     public async Task SearchAsync_PropagatesMetadata()
     {
         var request = MakeRequest(
-            new BomLineItem { BomItem = "cmu", Spec = "8 inch cmu", Quantity = 100 });
+            new BomLineItem { BomItem = "cmu", Description = "8 inch cmu", Quantity = 100 });
         request.ExtractionResult.TraceId = "trace-123";
         request.ExtractionResult.ProjectId = "proj-456";
         request.ExtractionResult.SourceFile = "estimate.csv";
@@ -131,7 +131,7 @@ public class SearchOrchestratorTests
     public async Task SearchAsync_CapturesItemQuantity()
     {
         var request = MakeRequest(
-            new BomLineItem { BomItem = "cmu", Spec = "8 inch cmu block", Quantity = 250 });
+            new BomLineItem { BomItem = "cmu", Description = "8 inch cmu block", Quantity = 250 });
 
         var sut = CreateOrchestrator();
         var result = await sut.SearchAsync(request);
@@ -145,9 +145,9 @@ public class SearchOrchestratorTests
     public async Task SearchAsync_StrategyFailsForOneItem_ContinuesOthers()
     {
         var request = MakeRequest(
-            new BomLineItem { BomItem = "good1", Spec = "first item" },
-            new BomLineItem { BomItem = "bad", Spec = "failing item" },
-            new BomLineItem { BomItem = "good2", Spec = "third item" });
+            new BomLineItem { BomItem = "good1", Description = "first item" },
+            new BomLineItem { BomItem = "bad", Description = "failing item" },
+            new BomLineItem { BomItem = "good2", Description = "third item" });
 
         _strategyMock.Setup(s => s.ExecuteAsync(
                 It.Is<BomLineItem>(i => i.BomItem == "bad"), It.IsAny<CancellationToken>()))
@@ -216,8 +216,8 @@ public class SearchOrchestratorTests
             });
 
         var request = MakeRequest(
-            new BomLineItem { BomItem = "item1", Spec = "spec1" },
-            new BomLineItem { BomItem = "item2", Spec = "spec2" });
+            new BomLineItem { BomItem = "item1", Description = "spec1" },
+            new BomLineItem { BomItem = "item2", Description = "spec2" });
 
         var sut = CreateOrchestrator();
         var result = await sut.SearchAsync(request);
@@ -232,9 +232,9 @@ public class SearchOrchestratorTests
     public async Task SearchAsync_DeduplicatesBomItems_ByName()
     {
         var request = MakeRequest(
-            new BomLineItem { BomItem = "Column C5", Spec = "Column type C5", Quantity = 2 },
-            new BomLineItem { BomItem = "Column C5", Spec = "Column type C5", Quantity = 2 },
-            new BomLineItem { BomItem = "rebar", Spec = "#4 rebar", Quantity = 50 });
+            new BomLineItem { BomItem = "Column C5", Description = "Column type C5", Quantity = 2 },
+            new BomLineItem { BomItem = "Column C5", Description = "Column type C5", Quantity = 2 },
+            new BomLineItem { BomItem = "rebar", Description = "#4 rebar", Quantity = 50 });
 
         var sut = CreateOrchestrator();
         var result = await sut.SearchAsync(request);
@@ -250,8 +250,8 @@ public class SearchOrchestratorTests
     public async Task SearchAsync_DeduplicatesBomItems_CaseInsensitive()
     {
         var request = MakeRequest(
-            new BomLineItem { BomItem = "Column C5", Spec = "Column type C5" },
-            new BomLineItem { BomItem = "column c5", Spec = "Column type C5" });
+            new BomLineItem { BomItem = "Column C5", Description = "Column type C5" },
+            new BomLineItem { BomItem = "column c5", Description = "Column type C5" });
 
         var sut = CreateOrchestrator();
         var result = await sut.SearchAsync(request);
@@ -263,8 +263,8 @@ public class SearchOrchestratorTests
     public async Task SearchAsync_NoDuplicates_ProcessesAll()
     {
         var request = MakeRequest(
-            new BomLineItem { BomItem = "cmu", Spec = "8 inch cmu" },
-            new BomLineItem { BomItem = "rebar", Spec = "#4 rebar" });
+            new BomLineItem { BomItem = "cmu", Description = "8 inch cmu" },
+            new BomLineItem { BomItem = "rebar", Description = "#4 rebar" });
 
         var sut = CreateOrchestrator();
         var result = await sut.SearchAsync(request);

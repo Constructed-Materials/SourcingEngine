@@ -109,7 +109,7 @@ public class FunctionTests
     }
 
     private static BomItemSearchResult CreateItemResult(
-        string bomItem, string spec, int matchCount)
+        string bomItem, string description, int matchCount)
     {
         var matches = Enumerable.Range(0, matchCount).Select(i => new ProductMatch
         {
@@ -121,11 +121,13 @@ public class FunctionTests
         return new BomItemSearchResult
         {
             BomItemName = bomItem,
-            Spec = spec,
+            Description = description,
             Quantity = 10,
+            Certifications = new List<string> { "ASTM C90" },
+            Notes = "test note",
             SearchResult = new SearchResult
             {
-                Query = spec,
+                Query = description,
                 FamilyLabel = "test-family",
                 CsiCode = "042200",
                 Matches = matches,
@@ -144,8 +146,8 @@ public class FunctionTests
         // Arrange: 2 BOM items — one with matches, one without
         var items = new[]
         {
-            new BomLineItem { BomItem = "CMU Block", Spec = "8 inch masonry block" },
-            new BomLineItem { BomItem = "Unknown Item", Spec = "some unknown product" },
+            new BomLineItem { BomItem = "CMU Block", Description = "8 inch masonry block" },
+            new BomLineItem { BomItem = "Unknown Item", Description = "some unknown product" },
         };
         var extraction = CreateExtractionResult(items: items);
 
@@ -190,8 +192,8 @@ public class FunctionTests
     {
         var items = new[]
         {
-            new BomLineItem { BomItem = "CMU Block", Spec = "8 inch masonry block" },
-            new BomLineItem { BomItem = "Rebar", Spec = "#4 rebar" },
+            new BomLineItem { BomItem = "CMU Block", Description = "8 inch masonry block" },
+            new BomLineItem { BomItem = "Rebar", Description = "#4 rebar" },
         };
         var extraction = CreateExtractionResult(items: items);
 
@@ -226,8 +228,8 @@ public class FunctionTests
     {
         var items = new[]
         {
-            new BomLineItem { BomItem = "Unknown A", Spec = "unknown product A" },
-            new BomLineItem { BomItem = "Unknown B", Spec = "unknown product B" },
+            new BomLineItem { BomItem = "Unknown A", Description = "unknown product A" },
+            new BomLineItem { BomItem = "Unknown B", Description = "unknown product B" },
         };
         var extraction = CreateExtractionResult(items: items);
 
@@ -356,7 +358,7 @@ public class FunctionTests
     [Fact]
     public async Task FunctionHandler_PublisherInitCalledOnce()
     {
-        var items = new[] { new BomLineItem { BomItem = "CMU", Spec = "block" } };
+        var items = new[] { new BomLineItem { BomItem = "CMU", Description = "block" } };
         var extraction = CreateExtractionResult(items: items);
 
         var itemResults = new List<BomItemSearchResult>
@@ -380,7 +382,7 @@ public class FunctionTests
     [Fact]
     public async Task FunctionHandler_ResultMessage_ContainsCorrectProductDetails()
     {
-        var items = new[] { new BomLineItem { BomItem = "CMU Block", Spec = "8 inch masonry block", Quantity = 100 } };
+        var items = new[] { new BomLineItem { BomItem = "CMU Block", Description = "8 inch masonry block", Quantity = 100 } };
         var extraction = CreateExtractionResult(items: items);
 
         var itemResults = new List<BomItemSearchResult>
@@ -414,7 +416,7 @@ public class FunctionTests
     [Fact]
     public async Task FunctionHandler_OrchestratorThrows_ExceptionPropagates()
     {
-        var items = new[] { new BomLineItem { BomItem = "CMU", Spec = "block" } };
+        var items = new[] { new BomLineItem { BomItem = "CMU", Description = "block" } };
         var extraction = CreateExtractionResult(items: items);
 
         _mockOrchestrator

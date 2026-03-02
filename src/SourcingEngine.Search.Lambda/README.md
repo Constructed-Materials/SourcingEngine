@@ -39,8 +39,8 @@ Amazon MQ (RabbitMQ)                    AWS Lambda                         Amazo
   "sourceUrl": "https://...",
   "itemCount": 15,
   "items": [
-    { "bomItem": "CMU Block", "spec": "8 inch masonry block" },
-    { "bomItem": "Floor Truss", "spec": "Pre Engineered Wood Floor Trusses" }
+    { "bomItem": "CMU Block", "description": "8 inch masonry block" },
+    { "bomItem": "Floor Truss", "description": "Pre Engineered Wood Floor Trusses" }
   ],
   "warnings": [],
   "modelUsed": "us.amazon.nova-pro-v1:0"
@@ -55,7 +55,7 @@ Amazon MQ (RabbitMQ)                    AWS Lambda                         Amazo
   "items": [
     {
       "bomItem": "CMU Block",
-      "spec": "8 inch masonry block",
+      "description": "8 inch masonry block",
       "products": [
         {
           "productId": "uuid",
@@ -78,7 +78,7 @@ Amazon MQ (RabbitMQ)                    AWS Lambda                         Amazo
   "traceId": "uuid-string",
   "fileName": "estimate.csv",
   "items": [
-    { "bomItem": "Custom Trim", "spec": "custom aluminum trim piece" }
+    { "bomItem": "Custom Trim", "description": "custom aluminum trim piece" }
   ],
   "publishedAt": "2026-02-25T12:00:00Z"
 }

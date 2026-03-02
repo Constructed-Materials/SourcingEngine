@@ -95,7 +95,7 @@ public class BomExtractionServiceTests : IDisposable
     public async Task ExtractAsync_ValidCsvFile_ReturnsExtractionResult()
     {
         var filePath = CreateTempFile("estimate.csv", "Material,Qty\nBlock,100");
-        SetupMockResponse("""[{"bom_item": "Block", "spec": "8 inch Block", "quantity": 100}]""");
+        SetupMockResponse("""[{"bom_item": "Block", "description": "8 inch Block", "quantity": 100}]""");
 
         var result = await _service.ExtractAsync(filePath);
 
@@ -115,9 +115,9 @@ public class BomExtractionServiceTests : IDisposable
         var filePath = CreateTempFile("multi.csv", "dummy");
         SetupMockResponse("""
             [
-                {"bom_item": "CMU Block", "spec": "8 inch CMU Block", "quantity": 1200},
-                {"bom_item": "Rebar", "spec": "#5 Rebar 20ft", "quantity": 350},
-                {"bom_item": "Mortar", "spec": "Type S Mortar", "quantity": 150}
+                {"bom_item": "CMU Block", "description": "8 inch CMU Block", "quantity": 1200},
+                {"bom_item": "Rebar", "description": "#5 Rebar 20ft", "quantity": 350},
+                {"bom_item": "Mortar", "description": "Type S Mortar", "quantity": 150}
             ]
             """);
 
@@ -143,7 +143,7 @@ public class BomExtractionServiceTests : IDisposable
     public async Task ExtractAsync_AllSupportedFormats_DoesNotThrow(string fileName)
     {
         var filePath = CreateTempFile(fileName);
-        SetupMockResponse("""[{"bom_item": "Test", "spec": "Test spec"}]""");
+        SetupMockResponse("""[{"bom_item": "Test", "description": "Test description"}]""");
 
         var result = await _service.ExtractAsync(filePath);
 
@@ -191,7 +191,7 @@ public class BomExtractionServiceTests : IDisposable
     {
         var filePath = CreateTempFile("big.csv", "lots of data");
         SetupMockResponse(
-            """[{"bom_item": "Block", "spec": "CMU Block", "quantity": 100}]""",
+            """[{"bom_item": "Block", "description": "CMU Block", "quantity": 100}]""",
             stopReason: "max_tokens",
             outputTokens: 5000);
 

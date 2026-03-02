@@ -46,7 +46,7 @@ public class QueryEmbeddingTextBuilder : IQueryEmbeddingTextBuilder
         // (e.g., "8 inch 200 mm 20 cm CMU concrete masonry unit concrete block").
         // Merging it into [DESCRIPTION] pushes the query vector closer to products
         // described in any of these variant terms, while keeping [SECTION] alignment intact.
-        var descriptionText = BuildEnrichedDescription(item.Spec, parsedQuery.SearchQuery);
+        var descriptionText = BuildEnrichedDescription(item.Description, parsedQuery.SearchQuery);
         AppendSection(sb, "DESCRIPTION", descriptionText);
 
         // [USE] — attributes that imply usage context (color, grade, finish, etc.)

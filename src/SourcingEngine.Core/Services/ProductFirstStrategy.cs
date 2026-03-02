@@ -51,14 +51,14 @@ public class ProductFirstStrategy : ISearchStrategy
                 "Semantic search settings - Threshold: {Threshold}, MatchCount: {MatchCount}, SimilarityThreshold: {SimilarityThreshold}",
                 _settings.SimilarityThreshold, _settings.MatchCount, _settings.SimilarityThreshold);
             // Step 1: LLM query parsing (mandatory) — extract family, dimensions, attributes
-            var searchText = item.Spec;
+            var searchText = item.Description;
             if (string.IsNullOrWhiteSpace(searchText))
                 searchText = item.BomItem;
 
             var parsedQuery = await ParseQueryAsync(searchText, cancellationToken);
             if (!parsedQuery.Success)
             {
-                warnings.Add($"LLM parsing failed: {parsedQuery.ErrorMessage}. Using raw spec text.");
+                warnings.Add($"LLM parsing failed: {parsedQuery.ErrorMessage}. Using raw description text.");
             }
 
             // Step 2: Build structured embedding text aligned with product format

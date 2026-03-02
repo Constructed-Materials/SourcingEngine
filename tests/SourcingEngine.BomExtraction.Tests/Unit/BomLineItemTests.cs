@@ -11,8 +11,13 @@ public class BomLineItemTests
         var item = new BomLineItem();
 
         Assert.Equal(string.Empty, item.BomItem);
-        Assert.Equal(string.Empty, item.Spec);
+        Assert.Equal(string.Empty, item.Description);
         Assert.Null(item.Quantity);
+        Assert.Null(item.Uom);
+        Assert.Null(item.Category);
+        Assert.Null(item.TechnicalSpecs);
+        Assert.Null(item.Certifications);
+        Assert.Null(item.Notes);
         Assert.NotNull(item.AdditionalData);
         Assert.Empty(item.AdditionalData);
     }
@@ -23,20 +28,33 @@ public class BomLineItemTests
         var item = new BomLineItem
         {
             BomItem = "Masonry Block",
-            Spec = "8 inch CMU Block",
+            Description = "8 inch CMU Block",
             Quantity = 1200,
+            Uom = "EA",
+            Category = "Masonry",
+            TechnicalSpecs = new List<TechnicalSpecItem>
+            {
+                new() { Name = "width", Value = 8, Uom = "in" },
+                new() { Name = "height", Value = 8, Uom = "in" },
+            },
+            Certifications = new List<string> { "ASTM C90", "LEED v5" },
+            Notes = "Load-bearing walls only",
             AdditionalData = new Dictionary<string, object?>
             {
-                ["section"] = "Masonry",
-                ["uom"] = "EA",
                 ["unit_price"] = 3.50,
             }
         };
 
         Assert.Equal("Masonry Block", item.BomItem);
-        Assert.Equal("8 inch CMU Block", item.Spec);
+        Assert.Equal("8 inch CMU Block", item.Description);
         Assert.Equal(1200, item.Quantity);
-        Assert.Equal(3, item.AdditionalData.Count);
+        Assert.Equal("EA", item.Uom);
+        Assert.Equal("Masonry", item.Category);
+        Assert.Equal(2, item.TechnicalSpecs!.Count);
+        Assert.Equal(2, item.Certifications!.Count);
+        Assert.Contains("ASTM C90", item.Certifications);
+        Assert.Equal("Load-bearing walls only", item.Notes);
+        Assert.Single(item.AdditionalData);
     }
 
     [Fact]
@@ -48,9 +66,9 @@ public class BomLineItemTests
             ModelUsed = "us.amazon.nova-pro-v1:0",
             Items = new List<BomLineItem>
             {
-                new() { BomItem = "Item 1", Spec = "Spec 1" },
-                new() { BomItem = "Item 2", Spec = "Spec 2" },
-                new() { BomItem = "Item 3", Spec = "Spec 3" },
+                new() { BomItem = "Item 1", Description = "Description 1" },
+                new() { BomItem = "Item 2", Description = "Description 2" },
+                new() { BomItem = "Item 3", Description = "Description 3" },
             }
         };
 

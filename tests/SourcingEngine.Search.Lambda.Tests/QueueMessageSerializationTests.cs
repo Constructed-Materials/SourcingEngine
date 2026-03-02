@@ -31,8 +31,10 @@ public class QueueMessageSerializationTests
                 new()
                 {
                     BomItem = "CMU Block",
-                    Spec = "8 inch masonry block",
+                    Description = "8 inch masonry block",
                     Quantity = 100,
+                    Certifications = new List<string> { "ASTM C90" },
+                    Notes = "Load-bearing walls",
                     MatchCount = 5,
                     FamilyLabel = "cmu",
                     CsiCode = "042200",
@@ -88,7 +90,7 @@ public class QueueMessageSerializationTests
                 new()
                 {
                     BomItem = "Rebar",
-                    Spec = "#4 rebar",
+                    Description = "#4 rebar",
                     Quantity = 50,
                     MatchCount = 3,
                     Matches = new List<ProductMatchDto>
@@ -131,7 +133,7 @@ public class QueueMessageSerializationTests
                 new()
                 {
                     BomItem = "Unknown Product",
-                    Spec = "something not in catalog",
+                    Description = "something not in catalog",
                     Quantity = 1,
                     Warnings = new List<string> { "No family match" },
                 }
@@ -161,7 +163,7 @@ public class QueueMessageSerializationTests
                 new()
                 {
                     BomItem = "Mystery Material",
-                    Spec = "alien construction fiber",
+                    Description = "alien construction fiber",
                     Quantity = 42,
                 }
             }

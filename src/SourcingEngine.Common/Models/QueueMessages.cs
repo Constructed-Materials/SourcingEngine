@@ -107,8 +107,8 @@ public class SourcingResultItem
     [JsonPropertyName("bomItem")]
     public string BomItem { get; set; } = string.Empty;
 
-    [JsonPropertyName("spec")]
-    public string Spec { get; set; } = string.Empty;
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
 
     [JsonPropertyName("quantity")]
     public double? Quantity { get; set; }
@@ -127,6 +127,12 @@ public class SourcingResultItem
 
     [JsonPropertyName("executionTimeMs")]
     public long ExecutionTimeMs { get; set; }
+
+    [JsonPropertyName("certifications")]
+    public List<string>? Certifications { get; set; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
 
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; set; } = new();
@@ -194,11 +200,17 @@ public class ZeroResultItem
     [JsonPropertyName("bomItem")]
     public string BomItem { get; set; } = string.Empty;
 
-    [JsonPropertyName("spec")]
-    public string Spec { get; set; } = string.Empty;
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
 
     [JsonPropertyName("quantity")]
     public double? Quantity { get; set; }
+
+    [JsonPropertyName("certifications")]
+    public List<string>? Certifications { get; set; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
 
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; set; } = new();

@@ -109,7 +109,7 @@ public class FunctionTests : IDisposable
             .Select(i => new BomLineItem
             {
                 BomItem = $"Item {i}",
-                Spec = $"Spec for item {i}",
+                Description = $"Spec for item {i}",
             })
             .ToList();
 

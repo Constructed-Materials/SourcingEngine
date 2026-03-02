@@ -28,7 +28,7 @@ public class QueryEmbeddingTextBuilderTests
     [Fact]
     public void BuildQueryEmbeddingText_AllFieldsPopulated_ContainsAllSections()
     {
-        var item = new BomLineItem { BomItem = "Masonry Block", Spec = "8 inch masonry block" };
+        var item = new BomLineItem { BomItem = "Masonry Block", Description = "8 inch masonry block" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = "cmu_blocks",
@@ -49,7 +49,7 @@ public class QueryEmbeddingTextBuilderTests
     [Fact]
     public void BuildQueryEmbeddingText_SearchQueryEnrichesDescription()
     {
-        var item = new BomLineItem { BomItem = "Masonry Block", Spec = "8 inch masonry block" };
+        var item = new BomLineItem { BomItem = "Masonry Block", Description = "8 inch masonry block" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = "cmu_blocks",
@@ -71,7 +71,7 @@ public class QueryEmbeddingTextBuilderTests
     [Fact]
     public void BuildQueryEmbeddingText_EmptySearchQuery_UsesSpecOnly()
     {
-        var item = new BomLineItem { BomItem = "Block", Spec = "8 inch masonry block" };
+        var item = new BomLineItem { BomItem = "Block", Description = "8 inch masonry block" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = "cmu_blocks",
@@ -90,7 +90,7 @@ public class QueryEmbeddingTextBuilderTests
     [Fact]
     public void BuildQueryEmbeddingText_NoFamily_OmitsFamilySection()
     {
-        var item = new BomLineItem { BomItem = "Unknown", Spec = "some material" };
+        var item = new BomLineItem { BomItem = "Unknown", Description = "some material" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = null,
@@ -107,7 +107,7 @@ public class QueryEmbeddingTextBuilderTests
     [Fact]
     public void BuildQueryEmbeddingText_NoSpecs_OmitsTechnicalSpecsSection()
     {
-        var item = new BomLineItem { BomItem = "Block", Spec = "masonry block" };
+        var item = new BomLineItem { BomItem = "Block", Description = "masonry block" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = "cmu_blocks",
@@ -124,7 +124,7 @@ public class QueryEmbeddingTextBuilderTests
     [Fact]
     public void BuildQueryEmbeddingText_NoAttributes_OmitsUseSection()
     {
-        var item = new BomLineItem { BomItem = "Block", Spec = "masonry block" };
+        var item = new BomLineItem { BomItem = "Block", Description = "masonry block" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = "cmu_blocks",
@@ -141,7 +141,7 @@ public class QueryEmbeddingTextBuilderTests
     [Fact]
     public void BuildQueryEmbeddingText_WindowExample_ProducesCorrectOutput()
     {
-        var item = new BomLineItem { BomItem = "Window", Spec = "36x48 vinyl double hung window low-e" };
+        var item = new BomLineItem { BomItem = "Window", Description = "36x48 vinyl double hung window low-e" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = "windows",

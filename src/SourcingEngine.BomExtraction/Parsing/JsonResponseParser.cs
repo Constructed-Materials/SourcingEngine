@@ -187,18 +187,27 @@ public class JsonResponseParser
                 var item = new BomLineItem
                 {
                     BomItem = GetStringValue(raw, "bom_item", "bomItem"),
-                    Spec = GetStringValue(raw, "spec"),
+                    Description = GetStringValue(raw, "description", "spec"),
                     Quantity = GetDoubleValue(raw, "quantity"),
+                    Uom = GetNullableStringValue(raw, "uom"),
+                    Category = GetNullableStringValue(raw, "category", "section"),
+                    TechnicalSpecs = GetTechnicalSpecs(raw, "technical_specs", "technicalSpecs"),
+                    Certifications = GetStringList(raw, "certifications"),
+                    Notes = GetNullableStringValue(raw, "notes"),
                     AdditionalData = GetAdditionalData(raw, "additional_data", "additionalData"),
                 };
 
-                if (!string.IsNullOrWhiteSpace(item.BomItem) && !string.IsNullOrWhiteSpace(item.Spec))
+                // Promote notes/certifications from additional_data when the LLM put them there
+                // instead of as top-level keys (backward compatibility).
+                PromoteFromAdditionalData(item);
+
+                if (!string.IsNullOrWhiteSpace(item.BomItem) && !string.IsNullOrWhiteSpace(item.Description))
                 {
                     items.Add(item);
                 }
                 else
                 {
-                    _logger.LogWarning("Item {Index} skipped — missing bom_item or spec: {Raw}",
+                    _logger.LogWarning("Item {Index} skipped — missing bom_item or description: {Raw}",
                         i, JsonSerializer.Serialize(raw));
                 }
             }
@@ -243,6 +252,137 @@ public class JsonResponseParser
             JsonValueKind.String when double.TryParse(element.GetString(), out var d) => d,
             _ => null
         };
+    }
+
+    /// <summary>
+    /// Get a nullable string value from the dict, trying multiple key names.
+    /// Returns null instead of empty string when not found.
+    /// </summary>
+    private static string? GetNullableStringValue(Dictionary<string, JsonElement> dict, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (dict.TryGetValue(key, out var element))
+            {
+                if (element.ValueKind == JsonValueKind.Null || element.ValueKind == JsonValueKind.Undefined)
+                    return null;
+
+                var val = element.ValueKind == JsonValueKind.String
+                    ? element.GetString()
+                    : element.ToString();
+
+                return string.IsNullOrWhiteSpace(val) ? null : val;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Extract the technical_specs array from the raw JSON, trying multiple key names.
+    /// </summary>
+    private static List<TechnicalSpecItem>? GetTechnicalSpecs(
+        Dictionary<string, JsonElement> dict, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (dict.TryGetValue(key, out var element) && element.ValueKind == JsonValueKind.Array)
+            {
+                var specs = new List<TechnicalSpecItem>();
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+
+                    var spec = new TechnicalSpecItem();
+
+                    if (item.TryGetProperty("name", out var nameProp) && nameProp.ValueKind == JsonValueKind.String)
+                        spec.Name = nameProp.GetString() ?? string.Empty;
+
+                    if (item.TryGetProperty("value", out var valueProp))
+                    {
+                        spec.Value = valueProp.ValueKind switch
+                        {
+                            JsonValueKind.Number => valueProp.GetDouble(),
+                            JsonValueKind.String when double.TryParse(valueProp.GetString(), out var d) => d,
+                            _ => null
+                        };
+                    }
+
+                    if (item.TryGetProperty("uom", out var uomProp) && uomProp.ValueKind == JsonValueKind.String)
+                        spec.Uom = uomProp.GetString();
+
+                    if (!string.IsNullOrWhiteSpace(spec.Name))
+                        specs.Add(spec);
+                }
+                return specs.Count > 0 ? specs : null;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Extract a list of strings from the dict, trying multiple key names.
+    /// Handles both JSON arrays of strings and bare string values (wraps into a single-element list).
+    /// </summary>
+    private static List<string>? GetStringList(Dictionary<string, JsonElement> dict, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!dict.TryGetValue(key, out var element))
+                continue;
+
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Array:
+                {
+                    var list = new List<string>();
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        var val = item.ValueKind == JsonValueKind.String
+                            ? item.GetString()
+                            : item.ToString();
+                        if (!string.IsNullOrWhiteSpace(val))
+                            list.Add(val);
+                    }
+                    return list.Count > 0 ? list : null;
+                }
+                case JsonValueKind.String:
+                {
+                    var val = element.GetString();
+                    return string.IsNullOrWhiteSpace(val) ? null : new List<string> { val };
+                }
+                case JsonValueKind.Null:
+                case JsonValueKind.Undefined:
+                    return null;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// If the LLM placed notes or certifications inside additional_data instead of at the
+    /// top level, promote them to their dedicated properties and remove from the dict.
+    /// </summary>
+    private static void PromoteFromAdditionalData(BomLineItem item)
+    {
+        var data = item.AdditionalData;
+
+        // Promote "notes" if not already set at the top level
+        if (item.Notes == null && data.TryGetValue("notes", out var notesVal))
+        {
+            var notes = notesVal?.ToString();
+            if (!string.IsNullOrWhiteSpace(notes))
+                item.Notes = notes;
+        }
+        data.Remove("notes");
+
+        // Promote "certifications" if not already set at the top level
+        if (item.Certifications == null && data.TryGetValue("certifications", out var certVal))
+        {
+            var certStr = certVal?.ToString();
+            if (!string.IsNullOrWhiteSpace(certStr))
+                item.Certifications = new List<string> { certStr };
+        }
+        data.Remove("certifications");
     }
 
     /// <summary>

@@ -46,13 +46,21 @@ public record BomItemSearchResult
     [JsonPropertyName("bomItem")]
     public string BomItemName { get; init; } = string.Empty;
 
-    /// <summary>Full specification text from the BOM extraction.</summary>
-    [JsonPropertyName("spec")]
-    public string Spec { get; init; } = string.Empty;
+    /// <summary>Full description/specification text from the BOM extraction.</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; init; } = string.Empty;
 
     /// <summary>Quantity from the BOM extraction.</summary>
     [JsonPropertyName("quantity")]
     public double? Quantity { get; init; }
+
+    /// <summary>Certifications from the BOM extraction.</summary>
+    [JsonPropertyName("certifications")]
+    public List<string>? Certifications { get; init; }
+
+    /// <summary>Notes from the BOM extraction.</summary>
+    [JsonPropertyName("notes")]
+    public string? Notes { get; init; }
 
     /// <summary>Product search results for this BOM item.</summary>
     [JsonPropertyName("searchResult")]

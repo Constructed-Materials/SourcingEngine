@@ -42,7 +42,7 @@ Amazon MQ (RabbitMQ)                    AWS Lambda                         Amazo
   "sourceFile": "estimate.csv",
   "sourceUrl": "https://...",
   "itemCount": 15,
-  "items": [{ "bomItem": "CMU Block", "spec": "8 inch masonry block" }],
+  "items": [{"bomItem": "CMU Block", "description": "8 inch masonry block"}],
   "warnings": [],
   "modelUsed": "us.amazon.nova-pro-v1:0",
   "inputTokens": 1200,

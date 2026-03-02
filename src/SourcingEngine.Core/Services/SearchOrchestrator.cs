@@ -67,8 +67,10 @@ public class SearchOrchestrator : ISearchOrchestrator
                 itemResults.Add(new BomItemSearchResult
                 {
                     BomItemName = item.BomItem,
-                    Spec = item.Spec,
+                    Description = item.Description,
                     Quantity = item.Quantity,
+                    Certifications = item.Certifications,
+                    Notes = item.Notes,
                     SearchResult = searchResult
                 });
 
@@ -85,11 +87,13 @@ public class SearchOrchestrator : ISearchOrchestrator
                 itemResults.Add(new BomItemSearchResult
                 {
                     BomItemName = item.BomItem,
-                    Spec = item.Spec,
+                    Description = item.Description,
                     Quantity = item.Quantity,
+                    Certifications = item.Certifications,
+                    Notes = item.Notes,
                     SearchResult = new SearchResult
                     {
-                        Query = item.Spec,
+                        Query = item.Description,
                         Warnings = [$"Search failed: {ex.Message}"]
                     }
                 });
@@ -127,7 +131,7 @@ public class SearchOrchestrator : ISearchOrchestrator
                 $"Search text exceeds maximum length of {MaxInputLength} characters.", nameof(bomText));
 
         // Wrap single text into a 1-item SourcingRequest
-        var item = new BomLineItem { BomItem = bomText, Spec = bomText };
+        var item = new BomLineItem { BomItem = bomText, Description = bomText };
 
         var stopwatch = Stopwatch.StartNew();
         _logger.LogInformation("Starting single-item search for: {BomText}", bomText);
@@ -154,7 +158,7 @@ public class SearchOrchestrator : ISearchOrchestrator
 
         return new SearchResult
         {
-            Query = item.Spec,
+            Query = item.Description,
             FamilyLabel = result.FamilyLabel,
             CsiCode = result.CsiCode,
             Matches = result.Matches,

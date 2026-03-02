@@ -70,7 +70,7 @@ public class ProductFirstStrategyTests
         // Default: query embedding text builder returns structured text
         _queryEmbeddingTextBuilderMock
             .Setup(b => b.BuildQueryEmbeddingText(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>()))
-            .Returns<BomLineItem, ParsedBomQuery>((item, _) => $"[DESCRIPTION] {item.Spec}");
+            .Returns<BomLineItem, ParsedBomQuery>((item, _) => $"[DESCRIPTION] {item.Description}");
 
         // Default: semantic search returns empty
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
@@ -82,10 +82,10 @@ public class ProductFirstStrategyTests
             .Returns((List<SemanticProductMatch> matches, TechnicalSpecs? _) => matches);
     }
 
-    private static BomLineItem MakeItem(string spec, string? bomItem = null) => new()
+    private static BomLineItem MakeItem(string description, string? bomItem = null) => new()
     {
-        BomItem = bomItem ?? spec,
-        Spec = spec
+        BomItem = bomItem ?? description,
+        Description = description
     };
 
     private static SemanticProductMatch MakeMatch(
@@ -214,7 +214,7 @@ public class ProductFirstStrategyTests
             .ReturnsAsync(new List<SemanticProductMatch>());
 
         var sut = CreateStrategy();
-        var item = new BomLineItem { BomItem = "floor joist", Spec = "" };
+        var item = new BomLineItem { BomItem = "floor joist", Description = "" };
         await sut.ExecuteAsync(item, CancellationToken.None);
 
         // When Spec is empty, should use BomItem as input

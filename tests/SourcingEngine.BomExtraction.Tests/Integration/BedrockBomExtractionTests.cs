@@ -92,9 +92,9 @@ public class BedrockBomExtractionTests : IDisposable
         foreach (var item in result.Items)
         {
             Assert.False(string.IsNullOrWhiteSpace(item.BomItem),
-                $"BomItem is empty. Spec: '{item.Spec}'");
-            Assert.False(string.IsNullOrWhiteSpace(item.Spec),
-                $"Spec is empty. BomItem: '{item.BomItem}'");
+                $"BomItem is empty. Description: '{item.Description}'");
+            Assert.False(string.IsNullOrWhiteSpace(item.Description),
+                $"Description is empty. BomItem: '{item.BomItem}'");
         }
     }
 
@@ -122,8 +122,8 @@ public class BedrockBomExtractionTests : IDisposable
 
         // The CSV has Masonry, Framing, Roofing, Doors sections.
         var sections = result.Items
-            .Where(i => i.AdditionalData.ContainsKey("section"))
-            .Select(i => i.AdditionalData["section"]?.ToString()?.ToLowerInvariant() ?? "")
+            .Where(i => !string.IsNullOrWhiteSpace(i.Category))
+            .Select(i => i.Category!.ToLowerInvariant())
             .Distinct()
             .ToList();
 
@@ -199,9 +199,9 @@ public class BedrockBomExtractionTests : IDisposable
         foreach (var item in result.Items)
         {
             Assert.False(string.IsNullOrWhiteSpace(item.BomItem),
-                $"BomItem is empty. Spec: '{item.Spec}'");
-            Assert.False(string.IsNullOrWhiteSpace(item.Spec),
-                $"Spec is empty. BomItem: '{item.BomItem}'");
+                $"BomItem is empty. Description: '{item.Description}'");
+            Assert.False(string.IsNullOrWhiteSpace(item.Description),
+                $"Description is empty. BomItem: '{item.BomItem}'");
         }
     }
 
@@ -230,6 +230,25 @@ public class BedrockBomExtractionTests : IDisposable
         Assert.True(result.InputTokens > 0);
         Assert.NotNull(result.OutputTokens);
         Assert.True(result.OutputTokens > 0);
+    }
+
+    // ================================================================
+    //  XLSX — stones-bom.xlsx
+    //  Tests native spreadsheet document processing.
+    // ================================================================
+
+    [Fact]
+    public async Task Xlsx_Extracts17Items_StonesBom()
+    {
+        var path = TestDataFile("stones-bom.xlsx");
+        Assert.NotNull(path);
+
+        var result = await _service.ExtractAsync(path!);
+
+        Assert.NotNull(result);
+        Assert.True(result.ItemCount >= 17,
+            $"Expected ≥17 items from XLSX but got {result.ItemCount}. " +
+            $"Warnings: {string.Join("; ", result.Warnings)}");
     }
 
     // ================================================================
@@ -262,9 +281,9 @@ public class BedrockBomExtractionTests : IDisposable
         foreach (var item in result.Items)
         {
             Assert.False(string.IsNullOrWhiteSpace(item.BomItem),
-                $"BomItem is empty. Spec: '{item.Spec}'");
-            Assert.False(string.IsNullOrWhiteSpace(item.Spec),
-                $"Spec is empty. BomItem: '{item.BomItem}'");
+                $"BomItem is empty. Description: '{item.Description}'");
+            Assert.False(string.IsNullOrWhiteSpace(item.Description),
+                $"Description is empty. BomItem: '{item.BomItem}'");
         }
     }
 

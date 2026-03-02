@@ -186,8 +186,10 @@ public class Function
             Items = withMatches.Select(item => new SourcingResultItem
             {
                 BomItem = item.BomItemName,
-                Spec = item.Spec,
+                Description = item.Description,
                 Quantity = item.Quantity,
+                Certifications = item.Certifications,
+                Notes = item.Notes,
                 MatchCount = item.SearchResult.MatchCount,
                 FamilyLabel = item.SearchResult.FamilyLabel,
                 CsiCode = item.SearchResult.CsiCode,
@@ -223,8 +225,10 @@ public class Function
             Items = zeroMatches.Select(item => new ZeroResultItem
             {
                 BomItem = item.BomItemName,
-                Spec = item.Spec,
+                Description = item.Description,
                 Quantity = item.Quantity,
+                Certifications = item.Certifications,
+                Notes = item.Notes,
                 Warnings = item.SearchResult.Warnings,
             }).ToList(),
         };

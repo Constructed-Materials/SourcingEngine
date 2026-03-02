@@ -98,8 +98,8 @@ public class QueueMessageSerializationTests
             ItemCount = 2,
             Items = new List<BomLineItem>
             {
-                new() { BomItem = "CMU Block", Spec = "8 inch masonry block" },
-                new() { BomItem = "Rebar", Spec = "#4 rebar 20ft" },
+                new() { BomItem = "CMU Block", Description = "8 inch masonry block" },
+                new() { BomItem = "Rebar", Description = "#4 rebar 20ft" },
             },
             Warnings = new List<string> { "Row 15 skipped: unrecognized format" },
             ModelUsed = "us.amazon.nova-pro-v1:0",
@@ -133,7 +133,7 @@ public class QueueMessageSerializationTests
             ItemCount = 1,
             Items = new List<BomLineItem>
             {
-                new() { BomItem = "Window", Spec = "6x4 double hung vinyl window" }
+                new() { BomItem = "Window", Description = "6x4 double hung vinyl window" }
             },
             Warnings = new List<string>(),
             ModelUsed = "us.amazon.nova-pro-v1:0",
