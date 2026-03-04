@@ -68,11 +68,7 @@ public class QueryEmbeddingTextBuilderTests
             .ReturnsAsync(new EnrichedEmbeddingText
             {
                 Description = "8 inch standard weight concrete masonry block for load-bearing wall construction",
-                TechnicalSpecs = new List<TechnicalSpecItem>
-                {
-                    new() { Name = "width", Value = 8, Uom = "in" },
-                    new() { Name = "height", Value = 8, Uom = "in" }
-                },
+                TechnicalSpecs = new List<TechnicalSpecItem>(),   // enricher never provides specs for BOM items
                 Enrichment = "Category: Masonry. Family: cmu blocks. Color: gray, type: standard."
             });
 
@@ -80,6 +76,7 @@ public class QueryEmbeddingTextBuilderTests
 
         Assert.Contains("[PRODUCT] Masonry Block", result);
         Assert.Contains("[DESCRIPTION] 8 inch standard weight concrete masonry block", result);
+        // Specs come directly from item.TechnicalSpecs, not the enricher
         Assert.Contains("\"name\":\"width\"", result);
         Assert.Contains("\"name\":\"height\"", result);
         Assert.Contains("[CERTIFICATIONS] ASTM C90, CSA A165.1", result);
@@ -133,7 +130,11 @@ public class QueryEmbeddingTextBuilderTests
         {
             BomItem = "Window",
             Description = "vinyl window",
-            Certifications = new List<string> { "ENERGY STAR" }
+            Certifications = new List<string> { "ENERGY STAR" },
+            TechnicalSpecs = new List<TechnicalSpecItem>
+            {
+                new() { Name = "width", Value = 36, Uom = "in" }
+            }
         };
         var parsed = new ParsedBomQuery
         {
@@ -148,10 +149,7 @@ public class QueryEmbeddingTextBuilderTests
             .ReturnsAsync(new EnrichedEmbeddingText
             {
                 Description = "vinyl window fenestration",
-                TechnicalSpecs = new List<TechnicalSpecItem>
-                {
-                    new() { Name = "width", Value = 36, Uom = "in" }
-                },
+                TechnicalSpecs = new List<TechnicalSpecItem>(),   // enricher never provides specs for BOM items
                 Enrichment = "windows family"
             });
 
@@ -189,31 +187,29 @@ public class QueryEmbeddingTextBuilderTests
             Success = true
         };
 
-        // LLM enricher normalizes the BOM item specs
+        // Enricher only provides description + enrichment (no specs for BOM items)
         _enricherMock.Setup(e => e.EnrichBomItemTextAsync(
                 It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EnrichedEmbeddingText
             {
                 Description = "Silver grey granite cladding, 30mm thickness",
-                TechnicalSpecs = new List<TechnicalSpecItem>
-                {
-                    new() { Name = "thickness", Value = 30, Uom = "mm" },
-                    new() { Name = "weight per area", Value = 18.5, Uom = "lbs/sq ft" }
-                },
+                TechnicalSpecs = new List<TechnicalSpecItem>(),
                 Enrichment = ""
             });
 
         var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
+        // Specs come directly from item.TechnicalSpecs
         Assert.Contains("\"name\":\"thickness\"", result);
         Assert.Contains("\"value\":30", result);
-        Assert.Contains("\"name\":\"weight per area\"", result);
+        Assert.Contains("\"name\":\"weight_per_area\"", result);
         Assert.Contains("18.5", result);
     }
 
     [Fact]
-    public async Task BuildQueryEmbeddingTextAsync_FallsToParsedSpecs_WhenBomSpecsEmpty()
+    public async Task BuildQueryEmbeddingTextAsync_NoBomSpecs_EmitsEmptyPlaceholder()
     {
+        // BOM item has no TechnicalSpecs → [TECHNICALSPECS] should be empty placeholder
         var item = new BomLineItem { BomItem = "Block", Description = "masonry block" };
         var parsed = new ParsedBomQuery
         {
@@ -222,25 +218,9 @@ public class QueryEmbeddingTextBuilderTests
             Success = true
         };
 
-        // LLM enricher normalizes specs from parsed query when BOM has none
-        _enricherMock.Setup(e => e.EnrichBomItemTextAsync(
-                It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EnrichedEmbeddingText
-            {
-                Description = "masonry block",
-                TechnicalSpecs = new List<TechnicalSpecItem>
-                {
-                    new() { Name = "width", Value = 8, Uom = "in" },
-                    new() { Name = "height", Value = 8, Uom = "in" }
-                },
-                Enrichment = ""
-            });
-
         var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
-        Assert.Contains("[TECHNICALSPECS]", result);
-        Assert.Contains("\"name\":\"width\"", result);
-        Assert.Contains("\"name\":\"height\"", result);
+        Assert.Contains("[TECHNICALSPECS] []", result);
     }
 
     [Fact]

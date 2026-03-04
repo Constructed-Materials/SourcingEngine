@@ -50,9 +50,9 @@ public class QueryEmbeddingTextBuilder : IQueryEmbeddingTextBuilder
         // [DESCRIPTION] — LLM-generated fluent description (includes synonym expansion)
         AppendSection(sb, "DESCRIPTION", enriched.Description);
 
-        // [TECHNICALSPECS] — JSON array of {name, value, uom} spec objects
-        var specsJson = enriched.TechnicalSpecs.Count > 0
-            ? JsonSerializer.Serialize(enriched.TechnicalSpecs)
+        // [TECHNICALSPECS] — directly from BOM item (not LLM), JSON-serialized
+        var specsJson = item.TechnicalSpecs != null && item.TechnicalSpecs.Count > 0
+            ? JsonSerializer.Serialize(item.TechnicalSpecs)
             : null;
         AppendSection(sb, "TECHNICALSPECS", specsJson);
 

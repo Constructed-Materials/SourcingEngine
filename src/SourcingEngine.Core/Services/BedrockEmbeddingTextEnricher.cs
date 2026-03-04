@@ -73,6 +73,11 @@ public class BedrockEmbeddingTextEnricher : IEmbeddingTextEnricher, IDisposable
         return BuildProductFallback(product);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// For BOM items the LLM only produces <c>description</c> and <c>enrichment</c>.
+    /// Technical specs and certifications are taken directly from the <see cref="BomLineItem"/>.
+    /// </remarks>
     public async Task<EnrichedEmbeddingText> EnrichBomItemTextAsync(
         BomLineItem bomItem,
         ParsedBomQuery parsedQuery,
@@ -82,7 +87,7 @@ public class BedrockEmbeddingTextEnricher : IEmbeddingTextEnricher, IDisposable
 
         try
         {
-            var result = await CallBedrockAsync(userPrompt, cancellationToken);
+            var result = await CallBedrockForBomAsync(userPrompt, cancellationToken);
             if (result != null)
                 return result;
         }
@@ -183,6 +188,85 @@ public class BedrockEmbeddingTextEnricher : IEmbeddingTextEnricher, IDisposable
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "Failed to parse LLM enrichment JSON: {Response}", responseText);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Sends a user prompt to AWS Bedrock with the BOM-specific system prompt
+    /// and parses the simplified 2-field response (description + enrichment only).
+    /// Returns <see langword="null"/> on empty response so callers fall back to deterministic text.
+    /// </summary>
+    private async Task<EnrichedEmbeddingText?> CallBedrockForBomAsync(
+        string userPrompt, CancellationToken cancellationToken)
+    {
+        var request = new ConverseRequest
+        {
+            ModelId = _settings.ParsingModelId,
+            System = new List<SystemContentBlock>
+            {
+                new() { Text = EmbeddingTextEnricherPrompts.BomItemSystemPrompt }
+            },
+            Messages = new List<Message>
+            {
+                new()
+                {
+                    Role = ConversationRole.User,
+                    Content = new List<ContentBlock>
+                    {
+                        new() { Text = userPrompt }
+                    }
+                }
+            },
+            InferenceConfig = new InferenceConfiguration
+            {
+                MaxTokens = _settings.ParsingMaxTokens,
+                Temperature = _settings.ParsingTemperature
+            }
+        };
+
+        var response = await _client.ConverseAsync(request, cancellationToken);
+        var outputText = response.Output?.Message?.Content?.FirstOrDefault()?.Text;
+
+        if (string.IsNullOrWhiteSpace(outputText))
+        {
+            _logger.LogWarning("Bedrock returned empty BOM enrichment response");
+            return null;
+        }
+
+        _logger.LogDebug("Bedrock BOM enrichment response ({InputTokens}in/{OutputTokens}out): {Response}",
+            response.Usage?.InputTokens, response.Usage?.OutputTokens, outputText);
+
+        try
+        {
+            var json = outputText.Trim();
+            if (json.StartsWith("```"))
+            {
+                var firstNewline = json.IndexOf('\n');
+                if (firstNewline > 0)
+                    json = json.Substring(firstNewline + 1);
+                if (json.EndsWith("```"))
+                    json = json.Substring(0, json.Length - 3);
+                json = json.Trim();
+            }
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            return new EnrichedEmbeddingText
+            {
+                Description = root.TryGetProperty("description", out var desc)
+                    ? desc.GetString() ?? string.Empty
+                    : string.Empty,
+                TechnicalSpecs = new List<TechnicalSpecItem>(),
+                Enrichment = root.TryGetProperty("enrichment", out var enrich)
+                    ? enrich.GetString() ?? string.Empty
+                    : string.Empty
+            };
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse BOM LLM enrichment JSON: {Response}", outputText);
             return null;
         }
     }
@@ -325,35 +409,18 @@ public class BedrockEmbeddingTextEnricher : IEmbeddingTextEnricher, IDisposable
         };
     }
 
+    /// <summary>
+    /// Deterministic fallback for BOM items when LLM enrichment fails.
+    /// Only produces <c>Description</c> and <c>Enrichment</c>.
+    /// <c>TechnicalSpecs</c> is always empty — the builder pulls specs from the BOM item directly.
+    /// </summary>
     internal static EnrichedEmbeddingText BuildBomItemFallback(BomLineItem bomItem, ParsedBomQuery parsedQuery)
     {
         // Description: merge BOM description with search query synonyms
         var descText = QueryEmbeddingTextBuilder.BuildEnrichedDescription(
             bomItem.Description, parsedQuery.SearchQuery);
 
-        // Fallback specs: use BOM item's already-structured TechnicalSpecs
-        var specs = bomItem.TechnicalSpecs != null && bomItem.TechnicalSpecs.Count > 0
-            ? bomItem.TechnicalSpecs.Where(s => !string.IsNullOrWhiteSpace(s.Name)).ToList()
-            : new List<TechnicalSpecItem>();
-
-        // If BOM has no specs, try to build from parsed query specs
-        if (specs.Count == 0 && parsedQuery.TechnicalSpecs?.Specs?.Count > 0)
-        {
-            specs = parsedQuery.TechnicalSpecs.Specs
-                .Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
-                .Select(kv =>
-                {
-                    var parsed = DimensionUnitConverter.ParseDimensionString(kv.Value);
-                    return new TechnicalSpecItem
-                    {
-                        Name = kv.Key.Replace('_', ' '),
-                        Value = parsed?.Value,
-                        Uom = parsed?.Unit ?? kv.Value // if unparseable, store raw string as uom
-                    };
-                })
-                .ToList();
-        }
-
+        // Enrichment: merge category, family, notes, additional data, attributes
         var enrichParts = new List<string>();
         if (!string.IsNullOrWhiteSpace(bomItem.Category))
             enrichParts.Add($"Category: {bomItem.Category}.");
@@ -375,7 +442,7 @@ public class BedrockEmbeddingTextEnricher : IEmbeddingTextEnricher, IDisposable
         return new EnrichedEmbeddingText
         {
             Description = descText,
-            TechnicalSpecs = specs,
+            TechnicalSpecs = new List<TechnicalSpecItem>(),
             Enrichment = string.Join(" ", enrichParts)
         };
     }

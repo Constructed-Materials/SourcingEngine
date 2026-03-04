@@ -43,14 +43,27 @@ PRODUCT DATA:
 Return ONLY valid JSON:";
 
     /// <summary>
+    /// System prompt for BOM LINE ITEM enrichment calls.
+    /// Expects JSON with only two keys: <c>description</c> (string) and <c>enrichment</c> (string).
+    /// Technical specs and certifications are taken directly from the BOM item — no LLM involvement.
+    /// </summary>
+    public const string BomItemSystemPrompt = @"You are a construction materials technical writer.
+Your job is to produce concise, fluent text that will be used as input for a vector embedding model.
+The text should be rich in domain-relevant terminology, avoiding filler words.
+Return ONLY valid JSON with exactly two keys: ""description"" and ""enrichment"".
+Both are strings.
+Do NOT include markdown, explanations, or anything outside the JSON object.";
+
+    /// <summary>
     /// User prompt template for enriching a BOM LINE ITEM's embedding text.
+    /// The LLM only produces <c>description</c> and <c>enrichment</c>.
+    /// Technical specs and certifications are sourced directly from the BOM item.
     /// Placeholders: {bom_item}, {bom_description}, {search_query}, {category},
     /// {technical_specs}, {certifications}, {notes}, {additional_data}, {family}, {attributes}
     /// </summary>
     public const string BomItemUserPromptTemplate = @"Given this BOM (Bill of Materials) line item, write:
-1) ""description"": A single concise sentence (max 40 words) describing the item being sourced. Include key dimensions and material type. Incorporate the expanded search terms naturally.
-2) ""technical_specs"": A JSON array of spec objects. Each object has: ""name"" (readable string, replace underscores with spaces), ""value"" (number, boolean, or string), ""uom"" (unit string like ""mm"", ""in"", ""ft"", or null for booleans/non-dimensional). Extract ALL specs from the input. Examples: {""name"":""thickness"",""value"":30,""uom"":""mm""}, {""name"":""weight per area"",""value"":18.5,""uom"":""lbs/sq ft""}. Return empty array [] if no specs exist.
-3) ""enrichment"": A concise paragraph (max 60 words) merging additional context (notes, origin, brand, grade, finish, category) into natural construction-industry language.
+1) ""description"": A single concise sentence (max 40 words). Include the item name, material type, and the main unit of measure with its value. Incorporate the expanded search terms naturally.
+2) ""enrichment"": A concise paragraph (max 60 words) merging additional context (notes, origin, brand, grade, finish, category) into natural construction-industry language. If no additional context exists, return an empty string.
 
 BOM ITEM DATA:
 - Item Name: {bom_item}
