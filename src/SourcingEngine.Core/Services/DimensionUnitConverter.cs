@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using SourcingEngine.Common.Models;
 
 namespace SourcingEngine.Core.Services;
 
@@ -355,5 +356,186 @@ public static class DimensionUnitConverter
         return value == Math.Floor(value)
             ? value.ToString("F0", CultureInfo.InvariantCulture)
             : value.ToString("F1", CultureInfo.InvariantCulture);
+    }
+
+    // ──────────────────────────────────────────────────────
+    // JSON → List<TechnicalSpecItem> (deterministic fallback)
+    // ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Parse a product's raw specifications JSON into a structured list of
+    /// <see cref="TechnicalSpecItem"/> objects. Uses unit suffix detection,
+    /// dimension string parsing, and readable key formatting.
+    /// Used as a deterministic fallback when the LLM enrichment fails.
+    /// </summary>
+    public static List<TechnicalSpecItem> ParseJsonToTechnicalSpecItems(string? specificationsJson)
+    {
+        if (string.IsNullOrWhiteSpace(specificationsJson))
+            return new List<TechnicalSpecItem>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(specificationsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return new List<TechnicalSpecItem>();
+
+            var items = new List<TechnicalSpecItem>();
+
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                items.AddRange(ParseJsonPropertyToSpecItems(prop.Name, prop.Value));
+            }
+
+            return items;
+        }
+        catch (JsonException)
+        {
+            return new List<TechnicalSpecItem>();
+        }
+    }
+
+    /// <summary>
+    /// Convert a single JSON property into one or more <see cref="TechnicalSpecItem"/> objects.
+    /// </summary>
+    private static List<TechnicalSpecItem> ParseJsonPropertyToSpecItems(string key, JsonElement element)
+    {
+        var items = new List<TechnicalSpecItem>();
+        var detected = DetectUnit(key);
+        var readableName = FormatKeyReadable(key);
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Number when element.TryGetDouble(out var numVal):
+                if (detected != null)
+                {
+                    items.Add(new TechnicalSpecItem
+                    {
+                        Name = detected.Value.BaseKey.Replace('_', ' '),
+                        Value = numVal,
+                        Uom = detected.Value.Unit
+                    });
+                }
+                else
+                {
+                    items.Add(new TechnicalSpecItem
+                    {
+                        Name = readableName,
+                        Value = numVal,
+                        Uom = null
+                    });
+                }
+                break;
+
+            case JsonValueKind.String:
+                var strVal = element.GetString();
+                if (!string.IsNullOrWhiteSpace(strVal))
+                {
+                    // Try parsing as a dimension string (e.g. "2cm", "8 in")
+                    var parsed = ParseDimensionString(strVal);
+                    if (parsed != null)
+                    {
+                        items.Add(new TechnicalSpecItem
+                        {
+                            Name = detected?.BaseKey.Replace('_', ' ') ?? readableName,
+                            Value = parsed.Value.Value,
+                            Uom = parsed.Value.Unit
+                        });
+                    }
+                    else
+                    {
+                        // Non-dimensional string value
+                        items.Add(new TechnicalSpecItem
+                        {
+                            Name = readableName,
+                            Value = strVal,
+                            Uom = null
+                        });
+                    }
+                }
+                break;
+
+            case JsonValueKind.True:
+                items.Add(new TechnicalSpecItem
+                {
+                    Name = readableName,
+                    Value = true,
+                    Uom = null
+                });
+                break;
+
+            case JsonValueKind.False:
+                items.Add(new TechnicalSpecItem
+                {
+                    Name = readableName,
+                    Value = false,
+                    Uom = null
+                });
+                break;
+
+            case JsonValueKind.Array:
+                items.AddRange(ParseJsonArrayToSpecItems(key, element, detected, readableName));
+                break;
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// Parse a JSON array property into multiple <see cref="TechnicalSpecItem"/> objects.
+    /// Numeric arrays with a detected unit emit one item per value.
+    /// String arrays are joined into a single item.
+    /// </summary>
+    private static List<TechnicalSpecItem> ParseJsonArrayToSpecItems(
+        string key, JsonElement arrayElement,
+        (string BaseKey, string Unit)? detected, string readableName)
+    {
+        var items = new List<TechnicalSpecItem>();
+        var stringValues = new List<string>();
+
+        foreach (var arrayItem in arrayElement.EnumerateArray())
+        {
+            if (arrayItem.ValueKind == JsonValueKind.Number && detected != null)
+            {
+                if (arrayItem.TryGetDouble(out var val))
+                {
+                    items.Add(new TechnicalSpecItem
+                    {
+                        Name = detected.Value.BaseKey.Replace('_', ' '),
+                        Value = val,
+                        Uom = detected.Value.Unit
+                    });
+                }
+            }
+            else if (arrayItem.ValueKind == JsonValueKind.String)
+            {
+                var s = arrayItem.GetString();
+                if (!string.IsNullOrWhiteSpace(s))
+                    stringValues.Add(s);
+            }
+            else if (arrayItem.ValueKind == JsonValueKind.Number)
+            {
+                if (arrayItem.TryGetDouble(out var val))
+                {
+                    items.Add(new TechnicalSpecItem
+                    {
+                        Name = readableName,
+                        Value = val,
+                        Uom = null
+                    });
+                }
+            }
+        }
+
+        if (stringValues.Count > 0 && items.Count == 0)
+        {
+            items.Add(new TechnicalSpecItem
+            {
+                Name = readableName,
+                Value = string.Join(", ", stringValues),
+                Uom = null
+            });
+        }
+
+        return items;
     }
 }

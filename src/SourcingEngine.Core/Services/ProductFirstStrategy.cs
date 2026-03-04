@@ -63,7 +63,7 @@ public class ProductFirstStrategy : ISearchStrategy
 
             // Step 2: Build structured embedding text aligned with product format
             var textToEmbed = parsedQuery.Success
-                ? _queryEmbeddingTextBuilder.BuildQueryEmbeddingText(item, parsedQuery)
+                ? await _queryEmbeddingTextBuilder.BuildQueryEmbeddingTextAsync(item, parsedQuery, cancellationToken)
                 : searchText;
 
             _logger.LogInformation(

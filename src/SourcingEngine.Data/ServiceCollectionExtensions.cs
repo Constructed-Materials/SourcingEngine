@@ -34,6 +34,7 @@ public static class ServiceCollectionExtensions
 
         // Core services
         services.AddMemoryCache();
+        services.AddSingleton<IEmbeddingTextEnricher, BedrockEmbeddingTextEnricher>();
         services.AddSingleton<IProductEmbeddingTextBuilder, ProductEmbeddingTextBuilder>();
         services.AddSingleton<IQueryEmbeddingTextBuilder, QueryEmbeddingTextBuilder>();
         services.AddSingleton<ISpecMatchReRanker, SpecMatchReRanker>();

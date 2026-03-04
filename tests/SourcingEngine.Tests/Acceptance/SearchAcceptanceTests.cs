@@ -33,7 +33,7 @@ public class SearchAcceptanceTests
         var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
         var bomLineItem = new BomLineItem 
         { 
-            BomItem = "Main Facade Cladding",
+            BomItem = "Granite (Silver Grey)",
             Description = "Granite (Silver Grey), Flamed, 30mm thickness", 
             Category = "Exterior Shell",
             Uom = "sq ft",

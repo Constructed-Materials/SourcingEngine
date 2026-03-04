@@ -56,7 +56,12 @@ public class EmbeddingGenerationService : IEmbeddingGenerationService
         var sql = $@"
             SELECT p.product_id, p.model_name, p.family_label, v.name AS vendor_name,
                    pk.description, pk.use_cases::text, pk.specifications::text,
-                   pk.ideal_applications::text, pk.not_recommended_for::text
+                   pk.ideal_applications::text, pk.not_recommended_for::text,
+                   COALESCE(
+                       (SELECT string_agg(c.title, ', ' ORDER BY c.title)
+                        FROM public.product_certifications pc2
+                        JOIN public.certifications c ON pc2.cert_id = c.cert_id
+                        WHERE pc2.product_id = p.product_id), '') AS cert_names
             FROM public.products p
             JOIN public.vendors v ON p.vendor_id = v.vendor_id
             LEFT JOIN public.product_knowledge pk ON p.product_id = pk.product_id
@@ -79,6 +84,11 @@ public class EmbeddingGenerationService : IEmbeddingGenerationService
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
+            var certNamesRaw = reader.IsDBNull(9) ? "" : reader.GetString(9);
+            var certList = string.IsNullOrWhiteSpace(certNamesRaw)
+                ? new List<string>()
+                : certNamesRaw.Split(", ", StringSplitOptions.RemoveEmptyEntries).ToList();
+
             products.Add(new ProductEmbeddingInput
             {
                 ProductId = reader.GetGuid(0),
@@ -89,7 +99,8 @@ public class EmbeddingGenerationService : IEmbeddingGenerationService
                 UseCases = reader.IsDBNull(5) ? null : reader.GetString(5),
                 SpecificationsJson = reader.IsDBNull(6) ? null : reader.GetString(6),
                 IdealApplications = reader.IsDBNull(7) ? null : reader.GetString(7),
-                NotRecommendedFor = reader.IsDBNull(8) ? null : reader.GetString(8)
+                NotRecommendedFor = reader.IsDBNull(8) ? null : reader.GetString(8),
+                Certifications = certList
             });
         }
 
@@ -107,7 +118,7 @@ public class EmbeddingGenerationService : IEmbeddingGenerationService
         {
             try
             {
-                var embeddingText = _textBuilder.BuildEmbeddingText(product);
+                var embeddingText = await _textBuilder.BuildEmbeddingTextAsync(product, cancellationToken);
 
                 if (string.IsNullOrWhiteSpace(embeddingText))
                 {

@@ -69,8 +69,8 @@ public class ProductFirstStrategyTests
 
         // Default: query embedding text builder returns structured text
         _queryEmbeddingTextBuilderMock
-            .Setup(b => b.BuildQueryEmbeddingText(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>()))
-            .Returns<BomLineItem, ParsedBomQuery>((item, _) => $"[DESCRIPTION] {item.Description}");
+            .Setup(b => b.BuildQueryEmbeddingTextAsync(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((BomLineItem item, ParsedBomQuery _, CancellationToken __) => $"[DESCRIPTION] {item.Description}");
 
         // Default: semantic search returns empty
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
@@ -148,8 +148,8 @@ public class ProductFirstStrategyTests
             });
 
         _queryEmbeddingTextBuilderMock
-            .Setup(b => b.BuildQueryEmbeddingText(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>()))
-            .Returns("[FAMILY] cmu_blocks\n[DESCRIPTION] 8 inch cmu");
+            .Setup(b => b.BuildQueryEmbeddingTextAsync(It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("[PRODUCT] 8 inch cmu [DESCRIPTION] 8 inch cmu");
 
         _semanticRepoMock.Setup(r => r.SearchByEmbeddingAsync(
                 It.IsAny<float[]>(), It.IsAny<float>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -160,7 +160,7 @@ public class ProductFirstStrategyTests
 
         // The structured embedding text should be passed to the embedding service
         _embeddingMock.Verify(e => e.GenerateEmbeddingAsync(
-            "[FAMILY] cmu_blocks\n[DESCRIPTION] 8 inch cmu", It.IsAny<CancellationToken>()), Times.Once);
+            "[PRODUCT] 8 inch cmu [DESCRIPTION] 8 inch cmu", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

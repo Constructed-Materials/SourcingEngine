@@ -302,7 +302,10 @@ public class JsonResponseParser
                         spec.Value = valueProp.ValueKind switch
                         {
                             JsonValueKind.Number => valueProp.GetDouble(),
+                            JsonValueKind.True => true,
+                            JsonValueKind.False => false,
                             JsonValueKind.String when double.TryParse(valueProp.GetString(), out var d) => d,
+                            JsonValueKind.String => valueProp.GetString(),
                             _ => null
                         };
                     }

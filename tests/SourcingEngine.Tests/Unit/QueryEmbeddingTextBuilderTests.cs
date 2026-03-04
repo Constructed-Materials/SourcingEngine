@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Moq;
 using SourcingEngine.Common.Models;
@@ -8,27 +9,51 @@ namespace SourcingEngine.Tests.Unit;
 
 /// <summary>
 /// Unit tests for <see cref="QueryEmbeddingTextBuilder"/>.
-/// Validates structured [SECTION] output, enriched description merging,
-/// and deduplication of overlapping tokens between spec and SearchQuery.
+/// Validates the unified 5-section [PRODUCT] [DESCRIPTION] [TECHNICALSPECS] [CERTIFICATIONS] [PRODUCTENRICHMENT]
+/// output format, enriched description merging, and that all labels are always present.
 /// </summary>
 public class QueryEmbeddingTextBuilderTests
 {
+    private readonly Mock<IEmbeddingTextEnricher> _enricherMock;
     private readonly QueryEmbeddingTextBuilder _builder;
 
     public QueryEmbeddingTextBuilderTests()
     {
+        _enricherMock = new Mock<IEmbeddingTextEnricher>();
         var logger = new Mock<ILogger<QueryEmbeddingTextBuilder>>();
-        _builder = new QueryEmbeddingTextBuilder(logger.Object);
+
+        // Default: enricher returns deterministic text
+        _enricherMock.Setup(e => e.EnrichBomItemTextAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((BomLineItem item, ParsedBomQuery pq, CancellationToken _) =>
+                new EnrichedEmbeddingText
+                {
+                    Description = item.Description ?? "",
+                    TechnicalSpecs = new List<TechnicalSpecItem>(),
+                    Enrichment = ""
+                });
+
+        _builder = new QueryEmbeddingTextBuilder(_enricherMock.Object, logger.Object);
     }
 
     // ──────────────────────────────────────────────────────
-    // Full pipeline tests
+    // 5-section format tests
     // ──────────────────────────────────────────────────────
 
     [Fact]
-    public void BuildQueryEmbeddingText_AllFieldsPopulated_ContainsAllSections()
+    public async Task BuildQueryEmbeddingTextAsync_AllFieldsPopulated_ContainsAll5Sections()
     {
-        var item = new BomLineItem { BomItem = "Masonry Block", Description = "8 inch masonry block" };
+        var item = new BomLineItem
+        {
+            BomItem = "Masonry Block",
+            Description = "8 inch masonry block",
+            TechnicalSpecs = new List<TechnicalSpecItem>
+            {
+                new() { Name = "width", Value = 8, Uom = "in" },
+                new() { Name = "height", Value = 8, Uom = "in" }
+            },
+            Certifications = new List<string> { "ASTM C90", "CSA A165.1" }
+        };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = "cmu_blocks",
@@ -38,134 +63,204 @@ public class QueryEmbeddingTextBuilderTests
             Success = true
         };
 
-        var result = _builder.BuildQueryEmbeddingText(item, parsed);
+        _enricherMock.Setup(e => e.EnrichBomItemTextAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EnrichedEmbeddingText
+            {
+                Description = "8 inch standard weight concrete masonry block for load-bearing wall construction",
+                TechnicalSpecs = new List<TechnicalSpecItem>
+                {
+                    new() { Name = "width", Value = 8, Uom = "in" },
+                    new() { Name = "height", Value = 8, Uom = "in" }
+                },
+                Enrichment = "Category: Masonry. Family: cmu blocks. Color: gray, type: standard."
+            });
 
-        Assert.Contains("[FAMILY] cmu blocks (cmu_blocks)", result);
-        Assert.Contains("[TECHNICALSPECS] width: 8 in | height: 8 in", result);
-        Assert.Contains("[DESCRIPTION]", result);
-        Assert.Contains("[USE] color: gray, type: standard", result);
+        var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
+
+        Assert.Contains("[PRODUCT] Masonry Block", result);
+        Assert.Contains("[DESCRIPTION] 8 inch standard weight concrete masonry block", result);
+        Assert.Contains("\"name\":\"width\"", result);
+        Assert.Contains("\"name\":\"height\"", result);
+        Assert.Contains("[CERTIFICATIONS] ASTM C90, CSA A165.1", result);
+        Assert.Contains("[PRODUCTENRICHMENT]", result);
     }
 
     [Fact]
-    public void BuildQueryEmbeddingText_SearchQueryEnrichesDescription()
+    public async Task BuildQueryEmbeddingTextAsync_AllLabelsAlwaysPresent_EvenWhenEmpty()
     {
-        var item = new BomLineItem { BomItem = "Masonry Block", Description = "8 inch masonry block" };
+        var item = new BomLineItem { BomItem = "Unknown Item", Description = "" };
         var parsed = new ParsedBomQuery
         {
-            MaterialFamily = "cmu_blocks",
-            SearchQuery = "8 inch 200 mm 20 cm CMU concrete masonry unit concrete block masonry block",
-            Success = true
-        };
-
-        var result = _builder.BuildQueryEmbeddingText(item, parsed);
-
-        // The enriched description should contain the original spec terms
-        Assert.Contains("8 inch masonry block", result);
-        // AND the additional expanded terms from SearchQuery (deduplicated)
-        Assert.Contains("200", result);
-        Assert.Contains("mm", result);
-        Assert.Contains("CMU", result);
-        Assert.Contains("concrete", result);
-    }
-
-    [Fact]
-    public void BuildQueryEmbeddingText_EmptySearchQuery_UsesSpecOnly()
-    {
-        var item = new BomLineItem { BomItem = "Block", Description = "8 inch masonry block" };
-        var parsed = new ParsedBomQuery
-        {
-            MaterialFamily = "cmu_blocks",
+            MaterialFamily = null,
+            TechnicalSpecs = new TechnicalSpecs(),
             SearchQuery = "",
             Success = true
         };
 
-        var result = _builder.BuildQueryEmbeddingText(item, parsed);
+        var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
-        Assert.Contains("[DESCRIPTION] 8 inch masonry block", result);
-        // Should NOT contain synonym-expanded terms
-        Assert.DoesNotContain("CMU", result);
-        Assert.DoesNotContain("200 mm", result);
+        // All 5 labels must be present, even with empty content
+        Assert.Contains("[PRODUCT]", result);
+        Assert.Contains("[DESCRIPTION]", result);
+        Assert.Contains("[TECHNICALSPECS]", result);
+        Assert.Contains("[CERTIFICATIONS]", result);
+        Assert.Contains("[PRODUCTENRICHMENT]", result);
     }
 
     [Fact]
-    public void BuildQueryEmbeddingText_NoFamily_OmitsFamilySection()
+    public async Task BuildQueryEmbeddingTextAsync_EmptySections_UseEmptyPlaceholder()
     {
-        var item = new BomLineItem { BomItem = "Unknown", Description = "some material" };
+        var item = new BomLineItem { BomItem = "Block", Description = "" };
         var parsed = new ParsedBomQuery
         {
             MaterialFamily = null,
-            SearchQuery = "some material building product",
-            Success = true
-        };
-
-        var result = _builder.BuildQueryEmbeddingText(item, parsed);
-
-        Assert.DoesNotContain("[FAMILY]", result);
-        Assert.Contains("[DESCRIPTION]", result);
-    }
-
-    [Fact]
-    public void BuildQueryEmbeddingText_NoSpecs_OmitsTechnicalSpecsSection()
-    {
-        var item = new BomLineItem { BomItem = "Block", Description = "masonry block" };
-        var parsed = new ParsedBomQuery
-        {
-            MaterialFamily = "cmu_blocks",
             TechnicalSpecs = new TechnicalSpecs(),
-            SearchQuery = "masonry block CMU",
+            SearchQuery = "",
             Success = true
         };
 
-        var result = _builder.BuildQueryEmbeddingText(item, parsed);
+        var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
-        Assert.DoesNotContain("[TECHNICALSPECS]", result);
+        // Empty sections should have "[]" placeholder
+        Assert.Contains("[CERTIFICATIONS] []", result);
     }
 
     [Fact]
-    public void BuildQueryEmbeddingText_NoAttributes_OmitsUseSection()
+    public async Task BuildQueryEmbeddingTextAsync_SectionOrder_IsFixed()
+    {
+        var item = new BomLineItem
+        {
+            BomItem = "Window",
+            Description = "vinyl window",
+            Certifications = new List<string> { "ENERGY STAR" }
+        };
+        var parsed = new ParsedBomQuery
+        {
+            MaterialFamily = "windows",
+            TechnicalSpecs = new TechnicalSpecs { Specs = new() { ["width"] = "36 in" } },
+            SearchQuery = "vinyl window fenestration",
+            Success = true
+        };
+
+        _enricherMock.Setup(e => e.EnrichBomItemTextAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EnrichedEmbeddingText
+            {
+                Description = "vinyl window fenestration",
+                TechnicalSpecs = new List<TechnicalSpecItem>
+                {
+                    new() { Name = "width", Value = 36, Uom = "in" }
+                },
+                Enrichment = "windows family"
+            });
+
+        var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
+
+        var productIdx = result.IndexOf("[PRODUCT]");
+        var descIdx = result.IndexOf("[DESCRIPTION]");
+        var specsIdx = result.IndexOf("[TECHNICALSPECS]");
+        var certsIdx = result.IndexOf("[CERTIFICATIONS]");
+        var enrichIdx = result.IndexOf("[PRODUCTENRICHMENT]");
+
+        Assert.True(productIdx < descIdx, "PRODUCT should come before DESCRIPTION");
+        Assert.True(descIdx < specsIdx, "DESCRIPTION should come before TECHNICALSPECS");
+        Assert.True(specsIdx < certsIdx, "TECHNICALSPECS should come before CERTIFICATIONS");
+        Assert.True(certsIdx < enrichIdx, "CERTIFICATIONS should come before PRODUCTENRICHMENT");
+    }
+
+    [Fact]
+    public async Task BuildQueryEmbeddingTextAsync_UsesBomItemTechnicalSpecs_WhenPresent()
+    {
+        var item = new BomLineItem
+        {
+            BomItem = "Granite Cladding",
+            Description = "Silver Grey Granite 30mm",
+            TechnicalSpecs = new List<TechnicalSpecItem>
+            {
+                new() { Name = "thickness", Value = 30, Uom = "mm" },
+                new() { Name = "weight_per_area", Value = 18.5, Uom = "lbs/sq ft" }
+            }
+        };
+        var parsed = new ParsedBomQuery
+        {
+            TechnicalSpecs = new TechnicalSpecs { Specs = new() { ["width"] = "30 mm" } },
+            SearchQuery = "granite cladding",
+            Success = true
+        };
+
+        // LLM enricher normalizes the BOM item specs
+        _enricherMock.Setup(e => e.EnrichBomItemTextAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EnrichedEmbeddingText
+            {
+                Description = "Silver grey granite cladding, 30mm thickness",
+                TechnicalSpecs = new List<TechnicalSpecItem>
+                {
+                    new() { Name = "thickness", Value = 30, Uom = "mm" },
+                    new() { Name = "weight per area", Value = 18.5, Uom = "lbs/sq ft" }
+                },
+                Enrichment = ""
+            });
+
+        var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
+
+        Assert.Contains("\"name\":\"thickness\"", result);
+        Assert.Contains("\"value\":30", result);
+        Assert.Contains("\"name\":\"weight per area\"", result);
+        Assert.Contains("18.5", result);
+    }
+
+    [Fact]
+    public async Task BuildQueryEmbeddingTextAsync_FallsToParsedSpecs_WhenBomSpecsEmpty()
     {
         var item = new BomLineItem { BomItem = "Block", Description = "masonry block" };
         var parsed = new ParsedBomQuery
         {
-            MaterialFamily = "cmu_blocks",
-            Attributes = new(),
+            TechnicalSpecs = new TechnicalSpecs { Specs = new() { ["width"] = "8 in", ["height"] = "8 in" } },
             SearchQuery = "masonry block",
             Success = true
         };
 
-        var result = _builder.BuildQueryEmbeddingText(item, parsed);
+        // LLM enricher normalizes specs from parsed query when BOM has none
+        _enricherMock.Setup(e => e.EnrichBomItemTextAsync(
+                It.IsAny<BomLineItem>(), It.IsAny<ParsedBomQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EnrichedEmbeddingText
+            {
+                Description = "masonry block",
+                TechnicalSpecs = new List<TechnicalSpecItem>
+                {
+                    new() { Name = "width", Value = 8, Uom = "in" },
+                    new() { Name = "height", Value = 8, Uom = "in" }
+                },
+                Enrichment = ""
+            });
 
-        Assert.DoesNotContain("[USE]", result);
+        var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
+
+        Assert.Contains("[TECHNICALSPECS]", result);
+        Assert.Contains("\"name\":\"width\"", result);
+        Assert.Contains("\"name\":\"height\"", result);
     }
 
     [Fact]
-    public void BuildQueryEmbeddingText_WindowExample_ProducesCorrectOutput()
+    public async Task BuildQueryEmbeddingTextAsync_NoCertifications_EmitsEmptyPlaceholder()
     {
-        var item = new BomLineItem { BomItem = "Window", Description = "36x48 vinyl double hung window low-e" };
+        var item = new BomLineItem { BomItem = "Block", Description = "masonry block" };
         var parsed = new ParsedBomQuery
         {
-            MaterialFamily = "windows",
-            TechnicalSpecs = new TechnicalSpecs
-            {
-                Specs = new() { ["width"] = "36 in", ["height"] = "48 in" }
-            },
-            Attributes = new() { ["type"] = "double hung", ["material"] = "vinyl", ["glazing"] = "low-e" },
-            SearchQuery = "36x48 vinyl window double hung low-e fenestration 36 inch 48 inch 900 mm 1200 mm",
+            TechnicalSpecs = new TechnicalSpecs(),
+            SearchQuery = "masonry block",
             Success = true
         };
 
-        var result = _builder.BuildQueryEmbeddingText(item, parsed);
+        var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
-        Assert.Contains("[FAMILY] windows (windows)", result);
-        Assert.Contains("[TECHNICALSPECS] width: 36 in | height: 48 in", result);
-        Assert.Contains("fenestration", result);
-        Assert.Contains("900", result);
-        Assert.Contains("1200", result);
-        Assert.Contains("[USE]", result);
+        Assert.Contains("[CERTIFICATIONS] []", result);
     }
 
     // ──────────────────────────────────────────────────────
-    // BuildEnrichedDescription unit tests
+    // BuildEnrichedDescription unit tests (static, unchanged)
     // ──────────────────────────────────────────────────────
 
     [Fact]
@@ -175,14 +270,11 @@ public class QueryEmbeddingTextBuilderTests
             "8 inch masonry block",
             "8 inch 200 mm 20 cm masonry block CMU concrete block");
 
-        // Original tokens preserved
         Assert.StartsWith("8 inch masonry block", result);
-        // New tokens appended
         Assert.Contains("200", result);
         Assert.Contains("mm", result);
         Assert.Contains("CMU", result);
         Assert.Contains("concrete", result);
-        // Duplicates NOT repeated (case-insensitive)
         Assert.Equal(1, CountOccurrences(result, "block"));
     }
 
@@ -232,7 +324,6 @@ public class QueryEmbeddingTextBuilderTests
             "Masonry Block",
             "masonry block CMU");
 
-        // "masonry" and "block" from SearchQuery are case-insensitive duplicates
         Assert.Contains("CMU", result);
         Assert.Equal(1, CountOccurrences(result.ToLower(), "masonry"));
         Assert.Equal(1, CountOccurrences(result.ToLower(), "block"));
@@ -245,7 +336,6 @@ public class QueryEmbeddingTextBuilderTests
             "8 inch masonry block gray",
             "8 inch masonry block");
 
-        // SearchQuery is a subset — no extra tokens to add
         Assert.Equal("8 inch masonry block gray", result);
     }
 
@@ -256,9 +346,7 @@ public class QueryEmbeddingTextBuilderTests
             "vinyl window",
             "vinyl window fenestration 900 mm 1200 mm double hung");
 
-        // Original spec is at the front
         Assert.StartsWith("vinyl window", result);
-        // Expanded terms follow
         var expandedPart = result.Substring("vinyl window ".Length);
         Assert.Contains("fenestration", expandedPart);
         Assert.Contains("900", expandedPart);

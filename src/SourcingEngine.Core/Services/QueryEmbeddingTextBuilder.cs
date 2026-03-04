@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SourcingEngine.Common.Models;
 
@@ -7,51 +8,62 @@ namespace SourcingEngine.Core.Services;
 /// <summary>
 /// Builds query text for embedding generation that structurally aligns
 /// with the product embedding format (<see cref="ProductEmbeddingTextBuilder"/>).
-/// This alignment is critical for cosine similarity to work well.
+/// Uses the unified 5-section format:
+/// [PRODUCT] [DESCRIPTION] [TECHNICALSPECS] [CERTIFICATIONS] [PRODUCTENRICHMENT]
 /// </summary>
 public interface IQueryEmbeddingTextBuilder
 {
     /// <summary>
     /// Build structured embedding text from a BOM line item and its LLM-parsed data.
     /// The output format mirrors the <c>[SECTION]</c> tags used by <see cref="ProductEmbeddingTextBuilder"/>.
-    /// The LLM-generated <see cref="ParsedBomQuery.SearchQuery"/> (synonym-expanded, multi-unit text)
-    /// is merged into the <c>[DESCRIPTION]</c> section to boost recall without breaking structural alignment.
+    /// All 5 section labels are always present, even when empty (using "[]" placeholder).
     /// </summary>
-    string BuildQueryEmbeddingText(BomLineItem item, ParsedBomQuery parsedQuery);
+    Task<string> BuildQueryEmbeddingTextAsync(
+        BomLineItem item, ParsedBomQuery parsedQuery, CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc />
 public class QueryEmbeddingTextBuilder : IQueryEmbeddingTextBuilder
 {
+    private readonly IEmbeddingTextEnricher _enricher;
     private readonly ILogger<QueryEmbeddingTextBuilder> _logger;
 
-    public QueryEmbeddingTextBuilder(ILogger<QueryEmbeddingTextBuilder> logger)
+    public QueryEmbeddingTextBuilder(
+        IEmbeddingTextEnricher enricher,
+        ILogger<QueryEmbeddingTextBuilder> logger)
     {
+        _enricher = enricher;
         _logger = logger;
     }
 
-    public string BuildQueryEmbeddingText(BomLineItem item, ParsedBomQuery parsedQuery)
+    public async Task<string> BuildQueryEmbeddingTextAsync(
+        BomLineItem item, ParsedBomQuery parsedQuery, CancellationToken cancellationToken = default)
     {
+        // Get LLM-enriched description and enrichment text
+        var enriched = await _enricher.EnrichBomItemTextAsync(item, parsedQuery, cancellationToken);
+
         var sb = new StringBuilder();
 
-        // [FAMILY] — from LLM-parsed material family
-        AppendSection(sb, "FAMILY", FormatFamilyLabel(parsedQuery.MaterialFamily));
+        // [PRODUCT] — BOM item name (always present)
+        AppendSection(sb, "PRODUCT", item.BomItem);
 
-        // [TECHNICALSPECS] — dimensions from LLM parsing
-        var specs = BuildTechnicalSpecs(parsedQuery);
-        AppendSection(sb, "TECHNICALSPECS", specs);
+        // [DESCRIPTION] — LLM-generated fluent description (includes synonym expansion)
+        AppendSection(sb, "DESCRIPTION", enriched.Description);
 
-        // [DESCRIPTION] — enriched: raw spec text + LLM synonym/size-expanded search query
-        // The SearchQuery from the LLM contains synonyms and unit conversions
-        // (e.g., "8 inch 200 mm 20 cm CMU concrete masonry unit concrete block").
-        // Merging it into [DESCRIPTION] pushes the query vector closer to products
-        // described in any of these variant terms, while keeping [SECTION] alignment intact.
-        var descriptionText = BuildEnrichedDescription(item.Description, parsedQuery.SearchQuery);
-        AppendSection(sb, "DESCRIPTION", descriptionText);
+        // [TECHNICALSPECS] — JSON array of {name, value, uom} spec objects
+        var specsJson = enriched.TechnicalSpecs.Count > 0
+            ? JsonSerializer.Serialize(enriched.TechnicalSpecs)
+            : null;
+        AppendSection(sb, "TECHNICALSPECS", specsJson);
 
-        // [USE] — attributes that imply usage context (color, grade, finish, etc.)
-        var attributes = BuildAttributesText(parsedQuery);
-        AppendSection(sb, "USE", attributes);
+        // [CERTIFICATIONS] — from BOM item certifications
+        var certsText = item.Certifications != null && item.Certifications.Count > 0
+            ? string.Join(", ", item.Certifications)
+            : null;
+        AppendSection(sb, "CERTIFICATIONS", certsText);
+
+        // [PRODUCTENRICHMENT] — LLM-generated: merged additional data, notes, attributes, family
+        AppendSection(sb, "PRODUCTENRICHMENT", enriched.Enrichment);
 
         var result = sb.ToString().Trim();
 
@@ -97,42 +109,18 @@ public class QueryEmbeddingTextBuilder : IQueryEmbeddingTextBuilder
         return $"{specText} {string.Join(' ', additional)}";
     }
 
-    private static string BuildTechnicalSpecs(ParsedBomQuery parsedQuery)
-    {
-        // All measurable specs (dimensions, r-values, u-factors, etc.)
-        // now live in TechnicalSpecs.Specs dictionary
-        return parsedQuery.TechnicalSpecs.ToEmbeddingFormat();
-    }
-
-    private static string BuildAttributesText(ParsedBomQuery parsedQuery)
-    {
-        var attrs = new List<string>();
-
-        foreach (var attr in parsedQuery.Attributes)
-        {
-            attrs.Add($"{attr.Key}: {attr.Value}");
-        }
-
-        return string.Join(", ", attrs);
-    }
-
-    private static string FormatFamilyLabel(string? familyLabel)
-    {
-        if (string.IsNullOrWhiteSpace(familyLabel))
-            return string.Empty;
-
-        // Match ProductEmbeddingTextBuilder format: readable + original
-        var readable = familyLabel.Replace("_", " ");
-        return $"{readable} ({familyLabel})";
-    }
-
+    /// <summary>
+    /// Append a section to the embedding text. Always emits the label,
+    /// using "[]" as placeholder when content is empty, to maintain
+    /// structural alignment between product and query embeddings.
+    /// </summary>
     private static void AppendSection(StringBuilder sb, string sectionName, string? content)
     {
-        if (string.IsNullOrWhiteSpace(content))
-            return;
-
         sb.Append('[').Append(sectionName).Append("] ");
-        sb.Append(content.Trim());
+        if (string.IsNullOrWhiteSpace(content))
+            sb.Append("[]");
+        else
+            sb.Append(content.Trim());
         sb.Append(' ');
     }
 }

@@ -1,27 +1,30 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
+using SourcingEngine.Common.Models;
 
 namespace SourcingEngine.Core.Services;
 
 /// <summary>
 /// Builds rich text representations of products for embedding generation.
-/// Combines product name, specifications, and enriched data into a format
-/// optimized for semantic similarity search.
+/// Uses the unified 5-section format:
+/// [PRODUCT] [DESCRIPTION] [TECHNICALSPECS] [CERTIFICATIONS] [PRODUCTENRICHMENT]
 /// </summary>
 public interface IProductEmbeddingTextBuilder
 {
     /// <summary>
-    /// Build embedding text for a product
+    /// Build embedding text for a product using LLM enrichment.
+    /// Always emits all 5 section labels in fixed order, even if empty.
     /// </summary>
-    /// <param name="product">Product data from public.products</param>
+    /// <param name="product">Product data from public.products + product_knowledge + certifications</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Formatted text optimized for embedding</returns>
-    string BuildEmbeddingText(ProductEmbeddingInput product);
+    Task<string> BuildEmbeddingTextAsync(ProductEmbeddingInput product, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
-/// Input data for building product embedding text
+/// Input data for building product embedding text.
+/// Aggregates data from public.products, product_knowledge, product_certifications, and certifications.
 /// </summary>
 public class ProductEmbeddingInput
 {
@@ -74,259 +77,87 @@ public class ProductEmbeddingInput
     /// Key features JSON (from vendor enriched data)
     /// </summary>
     public string? KeyFeaturesJson { get; set; }
+
+    /// <summary>
+    /// Certification names aggregated from product_certifications + certifications tables.
+    /// Example: ["ASTM C90", "CSA A165.1", "CCMPA Member"]
+    /// </summary>
+    public List<string> Certifications { get; set; } = new();
+
+    /// <summary>
+    /// Finishes/colors JSON from product_finishes (optional).
+    /// </summary>
+    public string? FinishesJson { get; set; }
 }
 
 /// <summary>
-/// Builds structured text for product embeddings.
+/// Builds structured text for product embeddings using the unified 5-section format.
 /// </summary>
 /// <remarks>
-/// Output format follows semantic sections for optimal embedding:
-/// [PRODUCT] {name} {sku}
-/// [TYPE] {product_type}
-/// [VENDOR] {vendor_name}
-/// [FAMILY] {family_label}
-/// [TECHNICALSPECS] {dimensions and specifications}
-/// [DESCRIPTION] {description}
-/// [USE] {use_when} {best_for}
-/// [AVOID] {dont_use_when}
+/// Output format — all labels always present, fixed order:
+/// [PRODUCT] {model_name}
+/// [DESCRIPTION] {LLM-generated fluent description}
+/// [TECHNICALSPECS] {normalized specs as "name: value uom | ..."}
+/// [CERTIFICATIONS] {comma-separated certs or "[]"}
+/// [PRODUCTENRICHMENT] {LLM-generated: vendor, family, use cases, avoid, finishes, features}
 /// </remarks>
 public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
 {
+    private readonly IEmbeddingTextEnricher _enricher;
     private readonly ILogger<ProductEmbeddingTextBuilder> _logger;
 
-    // Simple regex for extracting dimension values from text (e.g., "8 inch", "200mm")
-    private static readonly Regex DimensionPattern = new(
-        @"(\d+(?:\.\d+)?)\s*(inch|in|""|cm|mm|feet|ft|m)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    public ProductEmbeddingTextBuilder(ILogger<ProductEmbeddingTextBuilder> logger)
+    public ProductEmbeddingTextBuilder(
+        IEmbeddingTextEnricher enricher,
+        ILogger<ProductEmbeddingTextBuilder> logger)
     {
+        _enricher = enricher;
         _logger = logger;
     }
 
-    public string BuildEmbeddingText(ProductEmbeddingInput product)
+    public async Task<string> BuildEmbeddingTextAsync(
+        ProductEmbeddingInput product, CancellationToken cancellationToken = default)
     {
+        // Get LLM-enriched description and enrichment text
+        var enriched = await _enricher.EnrichProductTextAsync(product, cancellationToken);
+
         var sb = new StringBuilder();
 
-        // [PRODUCT] section - model name
+        // [PRODUCT] — model name (always present)
         AppendSection(sb, "PRODUCT", product.ModelName);
 
-        // [VENDOR] section - brand/manufacturer
-        AppendSection(sb, "VENDOR", product.VendorName);
+        // [DESCRIPTION] — LLM-generated fluent description
+        AppendSection(sb, "DESCRIPTION", enriched.Description);
 
-        // [FAMILY] section - material family
-        AppendSection(sb, "FAMILY", FormatFamilyLabel(product.FamilyLabel));
+        // [TECHNICALSPECS] — JSON array of {name, value, uom} spec objects
+        var specsJson = enriched.TechnicalSpecs.Count > 0
+            ? JsonSerializer.Serialize(enriched.TechnicalSpecs)
+            : null;
+        AppendSection(sb, "TECHNICALSPECS", specsJson);
 
-        // [TECHNICALSPECS] section - dimensions and specifications
-        var specs = BuildTechnicalSpecs(product);
-        AppendSection(sb, "TECHNICALSPECS", specs);
+        // [CERTIFICATIONS] — from product_certifications table
+        var certsText = product.Certifications.Count > 0
+            ? string.Join(", ", product.Certifications)
+            : null;
+        AppendSection(sb, "CERTIFICATIONS", certsText);
 
-        // [DESCRIPTION] section
-        AppendSection(sb, "DESCRIPTION", CleanDescription(product.Description));
-
-        // [USE] section - use cases and ideal applications
-        var useText = JoinNonEmpty(" ", product.UseCases, product.IdealApplications);
-        AppendSection(sb, "USE", useText);
-
-        // [AVOID] section - when not to use
-        AppendSection(sb, "AVOID", product.NotRecommendedFor);
-
-        // [FEATURES] section - key features from enriched data
-        var features = ExtractKeyFeatures(product.KeyFeaturesJson);
-        AppendSection(sb, "FEATURES", features);
+        // [PRODUCTENRICHMENT] — LLM-generated: vendor, family, use cases, avoid, finishes, features
+        AppendSection(sb, "PRODUCTENRICHMENT", enriched.Enrichment);
 
         return sb.ToString().Trim();
     }
 
-    private string BuildTechnicalSpecs(ProductEmbeddingInput product)
-    {
-        var specs = new List<string>();
-
-        // Parse specifications JSON — handle both array and object formats
-        if (!string.IsNullOrWhiteSpace(product.SpecificationsJson))
-        {
-            specs.AddRange(ParseSpecificationsJson(product.SpecificationsJson, product.ProductId));
-        }
-
-        // Extract dimensions from description if not already in specs
-        if (!string.IsNullOrWhiteSpace(product.Description) && specs.Count == 0)
-        {
-            var descDimensions = ExtractDimensionsFromText(product.Description);
-            if (!string.IsNullOrWhiteSpace(descDimensions))
-            {
-                specs.Add(descDimensions);
-            }
-        }
-
-        // Also try to extract from model name
-        if (!string.IsNullOrWhiteSpace(product.ModelName) && specs.Count == 0)
-        {
-            var modelDimensions = ExtractDimensionsFromText(product.ModelName);
-            if (!string.IsNullOrWhiteSpace(modelDimensions))
-            {
-                specs.Add(modelDimensions);
-            }
-        }
-
-        return string.Join(" | ", specs);
-    }
-
     /// <summary>
-    /// Parse specifications JSON, handling both the legacy array format
-    /// <c>[{name, value, unit}]</c> and the actual DB object format
-    /// <c>{key: value}</c> used across all product families.
-    /// Object format values can be: scalar numbers, strings, arrays, booleans.
-    /// Dimensional values are emitted with multi-unit conversion via <see cref="DimensionUnitConverter"/>.
+    /// Append a section to the embedding text. Always emits the label,
+    /// using "[]" as placeholder when content is empty, to maintain
+    /// structural alignment between product and query embeddings.
     /// </summary>
-    internal List<string> ParseSpecificationsJson(string json, Guid productId)
-    {
-        var specs = new List<string>();
-
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Array)
-            {
-                // Legacy format: [{name, value, unit}, ...]
-                var specArray = JsonSerializer.Deserialize<List<SpecificationItem>>(
-                    json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (specArray != null)
-                {
-                    foreach (var spec in specArray)
-                    {
-                        var specText = FormatSpecification(spec);
-                        if (!string.IsNullOrWhiteSpace(specText))
-                            specs.Add(specText);
-                    }
-                }
-            }
-            else if (root.ValueKind == JsonValueKind.Object)
-            {
-                // Actual DB format: flat object with typed values
-                // Handles: scalars, arrays, booleans — with multi-unit conversion for dimensional keys
-                var dict = new Dictionary<string, JsonElement>();
-                foreach (var prop in root.EnumerateObject())
-                {
-                    dict[prop.Name] = prop.Value.Clone();
-                }
-                specs.AddRange(DimensionUnitConverter.FormatSpecsFromJsonObject(dict));
-            }
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse specifications JSON for product {ProductId}", productId);
-        }
-
-        return specs;
-    }
-
-    private static string FormatSpecification(SpecificationItem spec)
-    {
-        if (string.IsNullOrWhiteSpace(spec.Value))
-            return string.Empty;
-
-        var name = spec.Name?.ToLowerInvariant() ?? "unknown";
-        var value = spec.Value.Trim();
-        var unit = spec.Unit;
-
-        // Format with unit if present
-        if (!string.IsNullOrWhiteSpace(unit))
-        {
-            return $"{name}: {value} {unit}";
-        }
-
-        return $"{name}: {value}";
-    }
-
-    private static string ExtractDimensionsFromText(string text)
-    {
-        var match = DimensionPattern.Match(text);
-        if (match.Success)
-        {
-            return $"size: {match.Value}";
-        }
-        return string.Empty;
-    }
-
-    private static string FormatFamilyLabel(string? familyLabel)
-    {
-        if (string.IsNullOrWhiteSpace(familyLabel))
-            return string.Empty;
-
-        // Convert underscore_case to readable format and include original
-        var readable = familyLabel.Replace("_", " ");
-        return $"{readable} ({familyLabel})";
-    }
-
-    private static string CleanDescription(string? description)
-    {
-        if (string.IsNullOrWhiteSpace(description))
-            return string.Empty;
-
-        return description.Trim();
-    }
-
-    private static string ExtractKeyFeatures(string? keyFeaturesJson)
-    {
-        if (string.IsNullOrWhiteSpace(keyFeaturesJson))
-            return string.Empty;
-
-        try
-        {
-            // Try parsing as array of strings
-            var features = JsonSerializer.Deserialize<List<string>>(keyFeaturesJson);
-            if (features != null && features.Count > 0)
-            {
-                return string.Join(", ", features.Where(f => !string.IsNullOrWhiteSpace(f)));
-            }
-        }
-        catch
-        {
-            // Try parsing as object with values
-            try
-            {
-                var featuresObj = JsonSerializer.Deserialize<Dictionary<string, string>>(keyFeaturesJson);
-                if (featuresObj != null && featuresObj.Count > 0)
-                {
-                    return string.Join(", ", featuresObj.Values.Where(v => !string.IsNullOrWhiteSpace(v)));
-                }
-            }
-            catch
-            {
-                // Return raw string as fallback
-                return keyFeaturesJson;
-            }
-        }
-
-        return string.Empty;
-    }
-
     private static void AppendSection(StringBuilder sb, string sectionName, string? content)
     {
-        if (string.IsNullOrWhiteSpace(content))
-            return;
-
         sb.Append('[').Append(sectionName).Append("] ");
-        sb.Append(content.Trim());
+        if (string.IsNullOrWhiteSpace(content))
+            sb.Append("[]");
+        else
+            sb.Append(content.Trim());
         sb.Append(' ');
     }
-
-    private static string JoinNonEmpty(string separator, params string?[] values)
-    {
-        return string.Join(separator, values.Where(v => !string.IsNullOrWhiteSpace(v)));
-    }
-}
-
-/// <summary>
-/// Specification item from products.specifications JSONB
-/// </summary>
-internal class SpecificationItem
-{
-    public string? Name { get; set; }
-    public string? Value { get; set; }
-    public string? Unit { get; set; }
-    public string? ValueType { get; set; }
 }
