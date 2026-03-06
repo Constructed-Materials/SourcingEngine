@@ -31,6 +31,9 @@ public static class SystemPrompts
                      "CU YD", "LB", "Lot", "SF"). null if not present.
            - "category": the BOM category/section the item belongs to
                      (e.g. "Masonry", "Framing", "Roofing", "Doors"). null if not present.
+           - "material": the primary construction material of the item
+                     (e.g. "concrete", "steel", "vinyl", "fiberglass", "wood",
+                     "aluminum", "glass", "gypsum", "copper", "stone"). null if unclear.
            - "technical_specs": array of ANY measurable/numeric technical property of the
                      product itself — dimensions AND physical characteristics.
                      Each entry is an object with "name", "value" (numeric), and "uom".
@@ -66,6 +69,7 @@ public static class SystemPrompts
             "quantity": 1200,
             "uom": "EA",
             "category": "Masonry",
+            "material": "concrete",
             "technical_specs": [
               { "name": "width", "value": 8, "uom": "in" },
               { "name": "height", "value": 8, "uom": "in" },
@@ -85,6 +89,7 @@ public static class SystemPrompts
             "quantity": 200,
             "uom": "EA",
             "category": "Framing",
+            "material": "wood",
             "technical_specs": [
               { "name": "thickness", "value": 0.75, "uom": "in" },
               { "name": "width", "value": 4, "uom": "ft" },
@@ -103,6 +108,7 @@ public static class SystemPrompts
             "quantity": 1200,
             "uom": "SF",
             "category": "Exterior Finishes",
+            "material": "porcelain",
             "technical_specs": [
               { "name": "thickness", "value": 40, "uom": "mm" },
               { "name": "weight_per_area", "value": 24, "uom": "lbs/sq ft" },

@@ -40,6 +40,14 @@ public class BomLineItem
     public string? Category { get; set; }
 
     /// <summary>
+    /// Primary construction material of the item (e.g. "concrete", "steel", "vinyl",
+    /// "fiberglass", "wood", "aluminum", "glass"). Extracted by the BOM extraction LLM.
+    /// Falls back to <c>ParsedBomQuery.Attributes["material"]</c> at search time if null.
+    /// </summary>
+    [JsonPropertyName("material")]
+    public string? Material { get; set; }
+
+    /// <summary>
     /// Measured/dimensional specifications extracted from the BOM line item.
     /// Each entry has a name, value, and unit (e.g. width = 8 in).
     /// </summary>

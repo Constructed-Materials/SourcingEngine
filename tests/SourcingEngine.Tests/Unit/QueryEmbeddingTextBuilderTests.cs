@@ -9,7 +9,7 @@ namespace SourcingEngine.Tests.Unit;
 
 /// <summary>
 /// Unit tests for <see cref="QueryEmbeddingTextBuilder"/>.
-/// Validates the unified 5-section [PRODUCT] [DESCRIPTION] [TECHNICALSPECS] [CERTIFICATIONS] [PRODUCTENRICHMENT]
+/// Validates the unified 6-section [MATERIAL] [PRODUCT] [DESCRIPTION] [TECHNICALSPECS] [CERTIFICATIONS] [PRODUCTENRICHMENT]
 /// output format, enriched description merging, and that all labels are always present.
 /// </summary>
 public class QueryEmbeddingTextBuilderTests
@@ -37,16 +37,17 @@ public class QueryEmbeddingTextBuilderTests
     }
 
     // ──────────────────────────────────────────────────────
-    // 5-section format tests
+    // 6-section format tests
     // ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task BuildQueryEmbeddingTextAsync_AllFieldsPopulated_ContainsAll5Sections()
+    public async Task BuildQueryEmbeddingTextAsync_AllFieldsPopulated_ContainsAll6Sections()
     {
         var item = new BomLineItem
         {
             BomItem = "Masonry Block",
             Description = "8 inch masonry block",
+            Material = "concrete",
             TechnicalSpecs = new List<TechnicalSpecItem>
             {
                 new() { Name = "width", Value = 8, Uom = "in" },
@@ -74,6 +75,7 @@ public class QueryEmbeddingTextBuilderTests
 
         var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
+        Assert.Contains("[MATERIAL] concrete", result);
         Assert.Contains("[PRODUCT] Masonry Block", result);
         Assert.Contains("[DESCRIPTION] 8 inch standard weight concrete masonry block", result);
         // Specs come directly from item.TechnicalSpecs, not the enricher
@@ -97,7 +99,8 @@ public class QueryEmbeddingTextBuilderTests
 
         var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
-        // All 5 labels must be present, even with empty content
+        // All 6 labels must be present, even with empty content
+        Assert.Contains("[MATERIAL]", result);
         Assert.Contains("[PRODUCT]", result);
         Assert.Contains("[DESCRIPTION]", result);
         Assert.Contains("[TECHNICALSPECS]", result);
@@ -155,12 +158,14 @@ public class QueryEmbeddingTextBuilderTests
 
         var result = await _builder.BuildQueryEmbeddingTextAsync(item, parsed);
 
+        var materialIdx = result.IndexOf("[MATERIAL]");
         var productIdx = result.IndexOf("[PRODUCT]");
         var descIdx = result.IndexOf("[DESCRIPTION]");
         var specsIdx = result.IndexOf("[TECHNICALSPECS]");
         var certsIdx = result.IndexOf("[CERTIFICATIONS]");
         var enrichIdx = result.IndexOf("[PRODUCTENRICHMENT]");
 
+        Assert.True(materialIdx < productIdx, "MATERIAL should come before PRODUCT");
         Assert.True(productIdx < descIdx, "PRODUCT should come before DESCRIPTION");
         Assert.True(descIdx < specsIdx, "DESCRIPTION should come before TECHNICALSPECS");
         Assert.True(specsIdx < certsIdx, "TECHNICALSPECS should come before CERTIFICATIONS");

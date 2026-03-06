@@ -328,6 +328,7 @@ public class BedrockEmbeddingTextEnricher : IEmbeddingTextEnricher, IDisposable
             .Replace("{model_name}", product.ModelName ?? "unknown")
             .Replace("{vendor_name}", product.VendorName ?? "unknown")
             .Replace("{family_label}", FormatFamilyLabel(product.FamilyLabel))
+            .Replace("{material}", product.Material ?? "unknown")
             .Replace("{specs}", product.SpecificationsJson ?? "none")
             .Replace("{description}", product.Description ?? "none")
             .Replace("{use_cases}", product.UseCases ?? "none")
@@ -362,6 +363,7 @@ public class BedrockEmbeddingTextEnricher : IEmbeddingTextEnricher, IDisposable
         return EmbeddingTextEnricherPrompts.BomItemUserPromptTemplate
             .Replace("{bom_item}", bomItem.BomItem)
             .Replace("{bom_description}", bomItem.Description ?? "none")
+            .Replace("{material}", bomItem.Material ?? "none")
             .Replace("{search_query}", parsedQuery.SearchQuery ?? "none")
             .Replace("{category}", bomItem.Category ?? "none")
             .Replace("{technical_specs}", specsText)

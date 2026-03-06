@@ -23,7 +23,7 @@ Do NOT include markdown, explanations, or anything outside the JSON object.";
     /// {use_cases}, {ideal_applications}, {not_recommended_for}, {certifications}, {finishes}, {key_features}
     /// </summary>
     public const string ProductUserPromptTemplate = @"Given this construction product data, write:
-1) ""description"": A single concise sentence (max 40 words) describing the product. Include the model name and primary dimensions/UOM. Do not repeat the model name more than once.
+1) ""description"": A single concise sentence (max 40 words) describing the product. Include the model name, material type, and primary dimensions/UOM. Do not repeat the model name more than once.
 2) ""technical_specs"": A JSON array of spec objects. Each object has: ""name"" (readable string, replace underscores with spaces, strip unit suffixes like _mm/_in), ""value"" (number, boolean, or string — use the raw value, e.g. 290 not ""290""), ""uom"" (unit string like ""mm"", ""in"", ""ft"", or null for booleans/non-dimensional). Extract ALL specs from the raw data. Examples: {""name"":""width"",""value"":290,""uom"":""mm""}, {""name"":""ssg available"",""value"":true,""uom"":null}, {""name"":""fabrication method"",""value"":""stick"",""uom"":null}. For array values (e.g. width options [100,140]), emit one object per value. Return empty array [] if no specs exist.
 3) ""enrichment"": A concise paragraph (max 80 words) covering vendor context, material family, ideal use cases, when NOT to use it, available finishes, and key features. Write in natural construction-industry language.
 
@@ -31,6 +31,7 @@ PRODUCT DATA:
 - Model: {model_name}
 - Vendor: {vendor_name}
 - Material Family: {family_label}
+- Material: {material}
 - Raw Specifications JSON: {specs}
 - Description: {description}
 - Use Cases: {use_cases}
@@ -68,6 +69,7 @@ Do NOT include markdown, explanations, or anything outside the JSON object.";
 BOM ITEM DATA:
 - Item Name: {bom_item}
 - Description: {bom_description}
+- Material: {material}
 - Expanded Search Terms: {search_query}
 - Category: {category}
 - Technical Specs: {technical_specs}

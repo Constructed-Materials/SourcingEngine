@@ -41,7 +41,7 @@ public class EmbeddingGenerationService : IEmbeddingGenerationService
         var parameters = new Dictionary<string, object>();
 
         if (options.MissingOnly)
-            whereConditions.Add("p.embedding IS NULL");
+            whereConditions.Add("p.embedding_description IS NULL");
         if (options.SpecificProductId.HasValue)
         {
             whereConditions.Add("p.product_id = @specificProductId");
@@ -118,16 +118,22 @@ public class EmbeddingGenerationService : IEmbeddingGenerationService
         {
             try
             {
-                var embeddingText = await _textBuilder.BuildEmbeddingTextAsync(product, cancellationToken);
+                var multiText = await _textBuilder.BuildMultiVectorTextAsync(product, cancellationToken);
 
-                if (string.IsNullOrWhiteSpace(embeddingText))
+                if (string.IsNullOrWhiteSpace(multiText.DescriptionText))
                 {
-                    _logger.LogWarning("Skipping product {ProductId} - empty embedding text", product.ProductId);
+                    _logger.LogWarning("Skipping product {ProductId} - empty description text", product.ProductId);
                     continue;
                 }
 
-                var embedding = await _embeddingService.GenerateEmbeddingAsync(embeddingText, cancellationToken);
-                await UpdateProductEmbeddingAsync(product.ProductId, embedding, embeddingText, cancellationToken);
+                var textsToEmbed = new[] { multiText.DescriptionText, multiText.SpecsText, multiText.EnrichmentText };
+                var embeddings = await _embeddingService.GenerateEmbeddingsAsync(textsToEmbed, cancellationToken);
+
+                await UpdateProductEmbeddingAsync(
+                    product.ProductId,
+                    embeddings[0], embeddings[1], embeddings[2],
+                    multiText.DescriptionText, multiText.SpecsText, multiText.EnrichmentText,
+                    cancellationToken);
 
                 processed++;
                 if (processed % 10 == 0 || products.Count < 10)
@@ -192,36 +198,43 @@ public class EmbeddingGenerationService : IEmbeddingGenerationService
 
     private async Task UpdateProductEmbeddingAsync(
         Guid productId,
-        float[] embedding,
-        string embeddingText,
+        float[] descriptionEmbedding,
+        float[] specsEmbedding,
+        float[] enrichmentEmbedding,
+        string descriptionText,
+        string specsText,
+        string enrichmentText,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.CreateConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
 
-        var vectorLiteral = EmbeddingUtilities.FormatPgVector(embedding);
-
         command.CommandText = @"
             UPDATE public.products 
-            SET embedding = @embedding::vector,
-                embedding_text = @embedding_text,
+            SET embedding_description = @emb_desc::vector,
+                embedding_specs = @emb_specs::vector,
+                embedding_enrichment = @emb_enrich::vector,
+                embedding_text_description = @text_desc,
+                embedding_text_specs = @text_specs,
+                embedding_text_enrichment = @text_enrich,
                 embedding_updated_at = NOW()
             WHERE product_id = @product_id";
 
-        var embeddingParam = command.CreateParameter();
-        embeddingParam.ParameterName = "embedding";
-        embeddingParam.Value = vectorLiteral;
-        command.Parameters.Add(embeddingParam);
+        void AddParam(string name, object value)
+        {
+            var p = command.CreateParameter();
+            p.ParameterName = name;
+            p.Value = value;
+            command.Parameters.Add(p);
+        }
 
-        var textParam = command.CreateParameter();
-        textParam.ParameterName = "embedding_text";
-        textParam.Value = embeddingText;
-        command.Parameters.Add(textParam);
-
-        var idParam = command.CreateParameter();
-        idParam.ParameterName = "product_id";
-        idParam.Value = productId;
-        command.Parameters.Add(idParam);
+        AddParam("emb_desc", EmbeddingUtilities.FormatPgVector(descriptionEmbedding));
+        AddParam("emb_specs", EmbeddingUtilities.FormatPgVector(specsEmbedding));
+        AddParam("emb_enrich", EmbeddingUtilities.FormatPgVector(enrichmentEmbedding));
+        AddParam("text_desc", descriptionText);
+        AddParam("text_specs", specsText);
+        AddParam("text_enrich", enrichmentText);
+        AddParam("product_id", productId);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }

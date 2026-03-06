@@ -61,29 +61,59 @@ public class ProductFirstStrategy : ISearchStrategy
                 warnings.Add($"LLM parsing failed: {parsedQuery.ErrorMessage}. Using raw description text.");
             }
 
-            // Step 2: Build structured embedding text aligned with product format
-            var textToEmbed = parsedQuery.Success
-                ? await _queryEmbeddingTextBuilder.BuildQueryEmbeddingTextAsync(item, parsedQuery, cancellationToken)
-                : searchText;
+            // Step 2: Build multi-vector query texts (description, specs, enrichment)
+            MultiVectorEmbeddingText multiText;
+            if (parsedQuery.Success)
+            {
+                multiText = await _queryEmbeddingTextBuilder.BuildMultiVectorQueryTextAsync(item, parsedQuery, cancellationToken);
+            }
+            else
+            {
+                // Fallback: put the raw text in the description vector, leave others minimal
+                multiText = new MultiVectorEmbeddingText
+                {
+                    DescriptionText = searchText,
+                    SpecsText = string.Empty,
+                    EnrichmentText = string.Empty,
+                    FullDebugText = searchText
+                };
+            }
 
             _logger.LogInformation(
-                "Embedding text for '{BomItem}': {EmbeddingText}",
-                item.BomItem, EmbeddingUtilities.TruncateForLog(textToEmbed));
+                "Multi-vector query text for '{BomItem}': desc={Desc}, specs={Specs}, enrich={Enrich}",
+                item.BomItem,
+                EmbeddingUtilities.TruncateForLog(multiText.DescriptionText),
+                EmbeddingUtilities.TruncateForLog(multiText.SpecsText),
+                EmbeddingUtilities.TruncateForLog(multiText.EnrichmentText));
 
-            // Step 3: Generate embedding
-            var embedding = await _embeddingService.GenerateEmbeddingAsync(textToEmbed, cancellationToken);
+            // Step 3: Generate 3 embeddings (batch)
+            var textsToEmbed = new[] { multiText.DescriptionText, multiText.SpecsText, multiText.EnrichmentText };
+            var embeddings = await _embeddingService.GenerateEmbeddingsAsync(textsToEmbed, cancellationToken);
+            var multiVectorQuery = new MultiVectorQuery
+            {
+                DescriptionEmbedding = embeddings[0],
+                SpecsEmbedding = embeddings[1],
+                EnrichmentEmbedding = embeddings[2]
+            };
 
             // Step 4: Build inline search filters from parsed query (hybrid search)
             var filters = parsedQuery.Success
                 ? BuildSearchFilters(parsedQuery)
                 : null;
 
-            // Step 5: Semantic search with inline filters
-            var semanticMatches = await _semanticProductRepository.SearchByEmbeddingAsync(
-                embedding,
+            // Step 5: Multi-vector semantic search (phase 1: HNSW retrieval, phase 2: weighted re-score)
+            var weights = (_settings.DescriptionVectorWeight,
+                           _settings.SpecsVectorWeight,
+                           _settings.EnrichmentVectorWeight);
+            var retrievalThreshold = _settings.SimilarityThreshold - _settings.RetrievalThresholdMargin;
+
+            var semanticMatches = await _semanticProductRepository.SearchByMultiVectorAsync(
+                multiVectorQuery,
                 filters,
                 _settings.SimilarityThreshold,
+                retrievalThreshold,
                 _settings.MatchCount,
+                weights,
                 cancellationToken);
 
             _logger.LogInformation("Semantic search found {Count} products above threshold {Threshold}",

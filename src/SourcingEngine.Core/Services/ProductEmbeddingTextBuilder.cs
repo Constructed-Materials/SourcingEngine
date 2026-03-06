@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SourcingEngine.Common.Models;
+using SourcingEngine.Core.Models;
 
 namespace SourcingEngine.Core.Services;
 
@@ -20,6 +21,14 @@ public interface IProductEmbeddingTextBuilder
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Formatted text optimized for embedding</returns>
     Task<string> BuildEmbeddingTextAsync(ProductEmbeddingInput product, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Build three separate embedding texts for multi-vector product embeddings.
+    /// Vector A: [MATERIAL] [PRODUCT] [DESCRIPTION] [CERTIFICATIONS]
+    /// Vector B: [TECHNICALSPECS]
+    /// Vector C: [PRODUCTENRICHMENT]
+    /// </summary>
+    Task<MultiVectorEmbeddingText> BuildMultiVectorTextAsync(ProductEmbeddingInput product, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -52,6 +61,13 @@ public class ProductEmbeddingInput
     /// Specifications JSON from product_knowledge.specifications
     /// </summary>
     public string? SpecificationsJson { get; set; }
+
+    /// <summary>
+    /// Primary construction material derived from family_label
+    /// (e.g. "concrete", "aluminum", "vinyl", "steel").
+    /// Used for the [MATERIAL] section in multi-vector embeddings.
+    /// </summary>
+    public string? Material { get; set; }
     
     /// <summary>
     /// Vendor/brand name from vendors.name
@@ -122,6 +138,9 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
 
         var sb = new StringBuilder();
 
+        // [MATERIAL] — primary construction material (always present)
+        AppendSection(sb, "MATERIAL", product.Material);
+
         // [PRODUCT] — model name (always present)
         AppendSection(sb, "PRODUCT", product.ModelName);
 
@@ -144,6 +163,53 @@ public class ProductEmbeddingTextBuilder : IProductEmbeddingTextBuilder
         AppendSection(sb, "PRODUCTENRICHMENT", enriched.Enrichment);
 
         return sb.ToString().Trim();
+    }
+
+    /// <inheritdoc />
+    public async Task<MultiVectorEmbeddingText> BuildMultiVectorTextAsync(
+        ProductEmbeddingInput product, CancellationToken cancellationToken = default)
+    {
+        var enriched = await _enricher.EnrichProductTextAsync(product, cancellationToken);
+
+        // Vector A: [MATERIAL] [PRODUCT] [DESCRIPTION] [CERTIFICATIONS]
+        var descSb = new StringBuilder();
+        AppendSection(descSb, "MATERIAL", product.Material);
+        AppendSection(descSb, "PRODUCT", product.ModelName);
+        AppendSection(descSb, "DESCRIPTION", enriched.Description);
+        var certsText = product.Certifications.Count > 0
+            ? string.Join(", ", product.Certifications)
+            : null;
+        AppendSection(descSb, "CERTIFICATIONS", certsText);
+
+        // Vector B: [TECHNICALSPECS]
+        var specsSb = new StringBuilder();
+        var specsJson = enriched.TechnicalSpecs.Count > 0
+            ? JsonSerializer.Serialize(enriched.TechnicalSpecs)
+            : null;
+        AppendSection(specsSb, "TECHNICALSPECS", specsJson);
+
+        // Vector C: [PRODUCTENRICHMENT]
+        var enrichSb = new StringBuilder();
+        AppendSection(enrichSb, "PRODUCTENRICHMENT", enriched.Enrichment);
+
+        var descriptionText = descSb.ToString().Trim();
+        var specsText = specsSb.ToString().Trim();
+        var enrichmentText = enrichSb.ToString().Trim();
+
+        // Full debug text: concat all 6 sections
+        var fullDebug = $"{descriptionText} {specsText} {enrichmentText}";
+
+        _logger.LogDebug(
+            "Built multi-vector text for product {ModelName}: desc={DescLen}, specs={SpecsLen}, enrich={EnrichLen}",
+            product.ModelName, descriptionText.Length, specsText.Length, enrichmentText.Length);
+
+        return new MultiVectorEmbeddingText
+        {
+            DescriptionText = descriptionText,
+            SpecsText = specsText,
+            EnrichmentText = enrichmentText,
+            FullDebugText = fullDebug
+        };
     }
 
     /// <summary>
