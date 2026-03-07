@@ -8,47 +8,43 @@ using Xunit;
 namespace SourcingEngine.Tests.Fixtures;
 
 /// <summary>
-/// Shared database fixture for integration tests.
-/// Registers all SourcingEngine services via the shared DI extension.
-/// Requires Bedrock to be enabled in appsettings.Test.json.
+/// Shared fixture for agent-based integration tests.
+/// Loads appsettings.AgentTest.json with Agent.Enabled=true,
+/// so <see cref="AgentSearchStrategy"/> is registered as <see cref="ISearchStrategy"/>.
 /// </summary>
-public class DatabaseFixture : IAsyncLifetime
+public class AgentDatabaseFixture : IAsyncLifetime
 {
     public IServiceProvider ServiceProvider { get; private set; } = null!;
-    public IDbConnectionFactory ConnectionFactory => ServiceProvider.GetRequiredService<IDbConnectionFactory>();
 
     public async Task InitializeAsync()
     {
         var configuration = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.Test.json", optional: false)
+            .AddJsonFile("appsettings.AgentTest.json", optional: false)
             .AddEnvironmentVariables()
             .Build();
 
         var services = new ServiceCollection();
 
-        // Logging
         services.AddLogging(builder =>
         {
             builder.AddConsole();
             builder.SetMinimumLevel(LogLevel.Debug);
         });
 
-        // Register all SourcingEngine services via shared extension
+        // Register all SourcingEngine services — with Agent.Enabled=true
+        // this will wire AgentSearchStrategy instead of ProductFirstStrategy
         services.AddSourcingEngine(configuration);
 
         ServiceProvider = services.BuildServiceProvider();
 
-        // Verify database connection on startup
-        //await using var connection = await ConnectionFactory.CreateConnectionAsync();
+        await Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
         if (ServiceProvider is IDisposable disposable)
-        {
             disposable.Dispose();
-        }
         return Task.CompletedTask;
     }
 
@@ -57,9 +53,9 @@ public class DatabaseFixture : IAsyncLifetime
 }
 
 /// <summary>
-/// Collection definition for sharing the database fixture
+/// Collection definition for sharing the agent database fixture.
 /// </summary>
-[CollectionDefinition("Database")]
-public class DatabaseCollection : ICollectionFixture<DatabaseFixture>
+[CollectionDefinition("AgentDatabase")]
+public class AgentDatabaseCollection : ICollectionFixture<AgentDatabaseFixture>
 {
 }

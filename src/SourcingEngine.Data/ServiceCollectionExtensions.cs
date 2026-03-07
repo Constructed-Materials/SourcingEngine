@@ -51,8 +51,19 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEmbeddingService, BedrockEmbeddingService>();
         services.AddSingleton<IQueryParserService, BedrockQueryParserService>();
 
-        // Search strategy — single ProductFirst strategy
-        services.AddScoped<ISearchStrategy, ProductFirstStrategy>();
+        // Search strategy — agent-based or product-first (vector) depending on configuration
+        var agentSettings = configuration.GetSection(AgentSettings.SectionName).Get<AgentSettings>();
+        if (agentSettings?.Enabled == true)
+        {
+            services.Configure<AgentSettings>(configuration.GetSection(AgentSettings.SectionName));
+            services.AddHttpClient("SupabaseMcp");
+            services.AddScoped<ISearchStrategy, AgentSearchStrategy>();
+        }
+        else
+        {
+            services.AddScoped<ISearchStrategy, ProductFirstStrategy>();
+        }
+
         services.AddScoped<ISearchOrchestrator, SearchOrchestrator>();
         services.AddScoped<IEmbeddingGenerationService, EmbeddingGenerationService>();
 
