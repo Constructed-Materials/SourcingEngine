@@ -65,4 +65,12 @@ public record ProductMatch
     [JsonPropertyName("finalScore")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public float? FinalScore { get; init; }
+
+    /// <summary>
+    /// Agent reasoning for why this product was selected (1-2 sentences).
+    /// Only populated when using Agent search mode.
+    /// </summary>
+    [JsonPropertyName("reasoning")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reasoning { get; init; }
 }

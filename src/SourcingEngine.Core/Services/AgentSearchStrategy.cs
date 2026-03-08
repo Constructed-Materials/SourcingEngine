@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Amazon;
 using Amazon.BedrockRuntime;
 using Microsoft.Extensions.Logging;
@@ -164,6 +165,16 @@ public class AgentSearchStrategy : ISearchStrategy
         if (item.Quantity.HasValue)
             sb.AppendLine($"**Quantity:** {item.Quantity} {item.Uom ?? "EA"}");
 
+        if (item.AdditionalData?.Count > 0)
+        {
+            sb.AppendLine("**Additional Attributes:**");
+            foreach (var kvp in item.AdditionalData)
+            {
+                if (kvp.Value is not null)
+                    sb.AppendLine($"  - {kvp.Key}: {kvp.Value}");
+            }
+        }
+
         return sb.ToString();
     }
 
@@ -238,6 +249,17 @@ public class AgentSearchStrategy : ISearchStrategy
                 }
             }
 
+            // Merge requirement_gaps into warnings so they surface in the response
+            if (root.TryGetProperty("requirement_gaps", out var gapsEl) && gapsEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var g in gapsEl.EnumerateArray())
+                {
+                    var text = g.GetString();
+                    if (!string.IsNullOrEmpty(text))
+                        warnings.Add($"[Gap] {text}");
+                }
+            }
+
             var matches = new List<ProductMatch>();
             if (root.TryGetProperty("matches", out var matchesEl) && matchesEl.ValueKind == JsonValueKind.Array)
             {
@@ -295,6 +317,7 @@ public class AgentSearchStrategy : ISearchStrategy
             var csiCode = element.TryGetProperty("csi_code", out var cc) ? cc.GetString() : null;
             var description = element.TryGetProperty("description", out var desc) ? desc.GetString() : null;
             var score = element.TryGetProperty("score", out var sc) ? sc.GetSingle() : 0.5f;
+            var reasoning = element.TryGetProperty("reasoning", out var r) ? r.GetString() : null;
 
             List<string>? useCases = null;
             if (element.TryGetProperty("use_cases", out var uc) && uc.ValueKind == JsonValueKind.Array)
@@ -323,7 +346,8 @@ public class AgentSearchStrategy : ISearchStrategy
                 Description = description,
                 UseCases = useCases,
                 TechnicalSpecs = specs,
-                FinalScore = score
+                FinalScore = score,
+                Reasoning = reasoning
             };
         }
         catch (Exception ex)
@@ -339,6 +363,9 @@ public class AgentSearchStrategy : ISearchStrategy
     private static string ExtractJson(string text)
     {
         var trimmed = text.Trim();
+
+        // Strip Nova Pro <thinking>...</thinking> blocks
+        trimmed = Regex.Replace(trimmed, @"<thinking>[\s\S]*?</thinking>", "", RegexOptions.IgnoreCase).Trim();
 
         // Strip markdown JSON fence
         if (trimmed.StartsWith("```json", StringComparison.OrdinalIgnoreCase))

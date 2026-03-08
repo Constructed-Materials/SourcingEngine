@@ -83,7 +83,7 @@ public class AgentSearchAcceptanceTests
             ],
             Certifications = ["ASTM C90"],
             Quantity = 500,
-            Uom = "EA"
+            Uom = "Inch"
         };
 
         var request = new SourcingRequest

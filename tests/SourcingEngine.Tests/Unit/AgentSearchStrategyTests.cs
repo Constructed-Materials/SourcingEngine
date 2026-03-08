@@ -147,6 +147,21 @@ public class AgentSearchStrategyTests
     }
 
     [Fact]
+    public void ExtractJson_ThinkingTags_StripsAndExtractsJson()
+    {
+        var input = """
+            <thinking>
+            The user wants masonry blocks. Let me search for CMU products.
+            </thinking>
+
+            {"family_label":"cmu_blocks","matches":[]}
+            """;
+        var result = InvokeExtractJson(input);
+        Assert.Contains("cmu_blocks", result);
+        Assert.DoesNotContain("thinking", result);
+    }
+
+    [Fact]
     public void ExtractJson_SurroundingText_ExtractsBraces()
     {
         var input = """Here are the results: {"family_label":"cmu_blocks","matches":[]} Hope this helps!""";
@@ -191,6 +206,7 @@ public class AgentSearchStrategyTests
         Assert.Equal("8in Standard CMU", result.Matches[0].ModelName);
         Assert.Equal("CEMEX", result.Matches[0].Vendor);
         Assert.Equal(0.95f, result.Matches[0].FinalScore);
+        Assert.Equal("Exact match for 8 inch CMU block", result.Matches[0].Reasoning);
         Assert.Empty(result.Warnings);
     }
 

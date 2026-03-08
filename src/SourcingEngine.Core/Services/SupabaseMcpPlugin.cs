@@ -60,6 +60,9 @@ public class SupabaseMcpPlugin
     {
         _logger.LogInformation("Agent SQL query: {Query}", query);
 
+        // Sanitize: strip markdown code fences and leading prose the LLM may wrap around the SQL
+        query = StripMarkdownFences(query);
+
         // Safety: reject non-SELECT queries
         var trimmed = query.TrimStart().ToUpperInvariant();
         if (!trimmed.StartsWith("SELECT") && !trimmed.StartsWith("WITH"))
@@ -246,5 +249,27 @@ public class SupabaseMcpPlugin
         }
 
         return textValue;
+    }
+
+    /// <summary>
+    /// Strips markdown code fences and SQL-prefixed prose that LLMs sometimes wrap around queries.
+    /// e.g., "```sql\nSELECT ...\n```" → "SELECT ..."
+    /// </summary>
+    internal static string StripMarkdownFences(string sql)
+    {
+        var trimmed = sql.Trim();
+
+        // Strip ```sql ... ``` or ``` ... ```
+        if (trimmed.StartsWith("```", StringComparison.Ordinal))
+        {
+            var firstNewline = trimmed.IndexOf('\n');
+            var lastFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+            if (firstNewline > 0 && lastFence > firstNewline)
+                return trimmed[(firstNewline + 1)..lastFence].Trim();
+            if (firstNewline > 0)
+                return trimmed[(firstNewline + 1)..].Trim();
+        }
+
+        return trimmed;
     }
 }
