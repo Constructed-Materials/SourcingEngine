@@ -61,11 +61,31 @@ You have access to a PostgreSQL database via the `execute_sql` tool. All tables 
 
 **product_certifications** — junction table linking products to certifications
 - `product_id` (uuid FK → products)
-- `certification_id` (int FK → certifications)
+- `cert_id` (uuid FK → certifications)
+- `certification_date` (date, nullable)
+- `expiry_date` (date, nullable)
+- `certificate_number` (varchar, nullable)
+- `verification_status` (varchar, nullable) — e.g., "verified", "pending"
 
 **certifications** — certification catalog
-- `certification_id` (int PK)
-- `name` (varchar) — e.g., "ASTM C90", "LEED v4.1"
+- `cert_id` (uuid PK)
+- `code` (varchar) — short code, e.g., "ASTM C90", "LEED v4.1"
+- `title` (text) — full name
+- `issuer` (varchar) — issuing body
+- `description` (text, nullable)
+- `valid_from` (date, nullable)
+- `valid_until` (date, nullable)
+- `certification_url` (varchar, nullable)
+
+**product_attribute_values** — key-value attribute store for products
+- `pav_id` (uuid PK)
+- `product_id` (uuid FK → products)
+- `attribute_key` (varchar) — attribute name, e.g., "color", "finish", "fire_rating"
+- `value_text` (text) — text value
+- `value_num` (numeric, nullable) — numeric value
+- `value_unit` (varchar, nullable) — unit of measure
+- `source_type` (varchar, nullable)
+- `confidence_score` (numeric, nullable)
 
 ## Search Strategy
 
@@ -129,9 +149,11 @@ Then re-filter to the correct family. If the BOM item could legitimately match m
 
 If the BOM item includes dimensional or technical requirements:
 
-1. **First, inspect** the `specifications` keys returned in Step 1 — keys vary by family (e.g., `width_inches` for CMU, `thickness_mm` for stone, `weight_kg_sqm` for panels). NEVER guess key names.
-2. **Score in reasoning** (preferred): Compare each product's specs to the BOM requirements mentally and reflect this in the score.
-3. **JSONB filter** (if too many results): Narrow with a follow-up query:
+1. **First, inspect** the `specifications` keys returned in Step 1 — keys vary by family (e.g., `width_inches` for CMU, `density_pcf` for stone, `weight_kg_sqm` for panels). NEVER guess key names.
+2. **If a spec key doesn't exist** in any product of the matched family, do NOT filter by it. Instead, note it in reasoning as "not tracked in database — verify with vendor." This is common for cut-to-order properties (see Material-Aware Spec Knowledge below).
+3. **Numeric tolerance**: When filtering by a numeric spec value, use ±20% tolerance. For example, if BOM says 30mm, search 24–36mm.
+4. **Score in reasoning** (preferred): Compare each product's specs to the BOM requirements mentally and reflect this in the score.
+5. **JSONB filter** (if too many results): Narrow with a follow-up query:
 ```sql
 WHERE pk.specifications IS NOT NULL
   AND (pk.specifications->>'<discovered_key>')::numeric BETWEEN <low> AND <high>
@@ -144,9 +166,9 @@ If the BOM item specifies required certifications or standards:
 
 1. Check `product_certifications` for product-level certs:
 ```sql
-SELECT p.product_id, c.name AS certification
+SELECT p.product_id, c.code AS certification_code, c.title AS certification_title
 FROM product_certifications pc
-JOIN certifications c ON c.certification_id = pc.certification_id
+JOIN certifications c ON c.cert_id = pc.cert_id
 JOIN products p ON p.product_id = pc.product_id
 WHERE p.product_id IN ('<id1>', '<id2>', ...)
 ORDER BY p.product_id;
@@ -179,6 +201,17 @@ Construction materials use both imperial and metric. Common conversions:
 
 When the BOM uses metric, convert to imperial for matching and vice versa. Search for both.
 
+### Material-Aware Spec Knowledge
+
+Not all properties are stored in `specifications`. Some are cut-to-order or project-specific:
+
+- **Natural stone** (granite, marble, limestone, travertine): Thickness is cut-to-order (standard cuts: 20mm, 30mm, 40mm, 50mm). Products list material properties (`stone_type`, `density_pcf`, `absorption_pct`, `compressive_strength_psi`, `modulus_of_rupture_psi`, `quarry_location`) but NOT thickness. If BOM specifies thickness, match by material family and note thickness as "standard cut-to-order size — verify with vendor."
+- **CMU/masonry blocks**: Nominal vs actual dimensions built-in. An "8 inch" block has 7.625" actual width. Specs include `width_inches`, `height_inches`, `length_inches`.
+- **Composite/cladding panels**: Fixed thicknesses listed in specs (`thickness_mm`, `panel_thickness_mm`).
+- **Metals/extrusions**: Profile dimensions in specs; cut-to-length is standard.
+
+When a BOM spec maps to a cut-to-order property, do NOT filter products by it — return all family matches and note it in `requirement_gaps` as a verify-with-vendor item.
+
 ## Scoring Guide
 
 Score each product 0.0–1.0 based on cumulative fit:
@@ -187,7 +220,7 @@ Score each product 0.0–1.0 based on cumulative fit:
 |------------------------|--------|-------------|
 | Material type match     | 0.25   | Product family matches requested material |
 | Name/description match  | 0.20   | Product name or description contains key terms |
-| Specification fit       | 0.20   | Dimensions/properties within acceptable range |
+| Specification fit       | 0.20   | Dimensions/properties within ±20% range, or material family matches and spec is cut-to-order |
 | Application alignment   | 0.15   | `ideal_applications` overlaps with BOM category; not in `not_recommended_for` |
 | Certification coverage  | 0.10   | Required certs found at product or vendor level |
 | Color/finish match      | 0.10   | Color and finish match if specified |
@@ -241,3 +274,4 @@ After finding matching products, respond with ONLY the following JSON structure 
 10. If no products match, return an empty matches array with a warning explaining what was searched and why nothing matched.
 11. Be efficient — target 2-4 SQL queries total. Don't run excessive queries.
 12. When results span multiple families, include the best-fit family in `family_label` but keep matches from alternative families if relevant (document this in reasoning).
+13. **Error recovery**: If a query returns a column-not-found or relation-not-found error, run `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '<table>' ORDER BY ordinal_position` to discover the correct column names, then retry with the corrected query.

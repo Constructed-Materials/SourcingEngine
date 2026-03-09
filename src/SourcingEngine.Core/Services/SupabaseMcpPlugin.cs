@@ -43,9 +43,9 @@ public class SupabaseMcpPlugin
     /// - product_knowledge: product_id (uuid FK), model (varchar), vendor_key (varchar), description (text), use_cases (text[]), specifications (jsonb), ideal_applications (text[]), not_recommended_for (text[])
     /// - vendors: vendor_id (int PK), name (varchar), vendor_type (varchar), is_manufacturer (bool), certifications (text[]), description (text)
     /// - cm_master_materials: family_label (varchar PK), family_name (varchar), csi_division (varchar), synonyms (text), fts (tsvector)
-    /// - product_certifications: product_id (uuid FK), certification_id (int FK)
-    /// - certifications: certification_id (int PK), name (varchar), standard_body (varchar)
-    /// - product_attribute_values: product_id (uuid FK), attribute_id (int FK), value (text)
+    /// - product_certifications: product_id (uuid FK), cert_id (uuid FK), verification_status (varchar)
+    /// - certifications: cert_id (uuid PK), code (varchar), title (text), issuer (varchar)
+    /// - product_attribute_values: pav_id (uuid PK), product_id (uuid FK), attribute_key (varchar), value_text (text), value_num (numeric), value_unit (varchar)
     /// 
     /// IMPORTANT: Only use SELECT queries. Never INSERT, UPDATE, DELETE, or DROP.
     /// IMPORTANT: Always filter by is_active = true on the products table.
