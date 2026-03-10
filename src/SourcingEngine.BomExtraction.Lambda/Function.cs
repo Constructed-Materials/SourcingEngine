@@ -157,6 +157,12 @@ public class Function
         }
     }
 
+    /// <summary>
+    /// Maximum number of BOM items per result message.
+    /// Keeps downstream Lambda invocations within Bedrock TPM limits and timeout budget.
+    /// </summary>
+    private const int ChunkSize = 5;
+
     private async Task ProcessRequestFilesAsync(
         ExtractionRequestMessage request,
         string tempDir,
@@ -179,27 +185,45 @@ public class Function
 
             var extractionResult = await _extractionService.ExtractAsync(localPath);
 
-            // Build result message matching the Python contract
-            var resultMessage = new ExtractionResultMessage
-            {
-                TraceId = request.TraceId,
-                ProjectId = request.ProjectId,
-                SourceFile = fileRef.FileName,
-                SourceUrl = fileRef.Url,
-                ItemCount = extractionResult.ItemCount,
-                Items = extractionResult.Items,
-                Warnings = extractionResult.Warnings,
-                ModelUsed = extractionResult.ModelUsed,
-                InputTokens = extractionResult.InputTokens,
-                OutputTokens = extractionResult.OutputTokens,
-            };
-
-            // Publish to result queue
-            await _publisher.PublishResultAsync(resultMessage, request.TraceId);
+            // Chunk items into batches so each downstream Lambda invocation
+            // stays within Bedrock TPM limits and the 900s timeout budget.
+            var chunks = extractionResult.Items
+                .Select((item, idx) => (item, idx))
+                .GroupBy(x => x.idx / ChunkSize)
+                .Select(g => g.Select(x => x.item).ToList())
+                .ToList();
 
             _logger.LogInformation(
-                "trace_id={TraceId} Published result for {FileName}: {ItemCount} items ({InputTokens}in/{OutputTokens}out)",
-                request.TraceId, fileRef.FileName, extractionResult.ItemCount,
+                "trace_id={TraceId} Extracted {ItemCount} items from {FileName}, publishing in {ChunkCount} chunk(s) of up to {ChunkSize}",
+                request.TraceId, extractionResult.ItemCount, fileRef.FileName, chunks.Count, ChunkSize);
+
+            for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
+            {
+                var chunk = chunks[chunkIndex];
+                var resultMessage = new ExtractionResultMessage
+                {
+                    TraceId = request.TraceId,
+                    ProjectId = request.ProjectId,
+                    SourceFile = fileRef.FileName,
+                    SourceUrl = fileRef.Url,
+                    ItemCount = chunk.Count,
+                    Items = chunk,
+                    Warnings = chunkIndex == 0 ? extractionResult.Warnings : [],
+                    ModelUsed = extractionResult.ModelUsed,
+                    InputTokens = chunkIndex == 0 ? extractionResult.InputTokens : null,
+                    OutputTokens = chunkIndex == 0 ? extractionResult.OutputTokens : null,
+                };
+
+                await _publisher.PublishResultAsync(resultMessage, request.TraceId);
+
+                _logger.LogInformation(
+                    "trace_id={TraceId} Published chunk {ChunkIndex}/{ChunkCount} for {FileName}: {ItemCount} items",
+                    request.TraceId, chunkIndex + 1, chunks.Count, fileRef.FileName, chunk.Count);
+            }
+
+            _logger.LogInformation(
+                "trace_id={TraceId} Completed {FileName}: {ItemCount} items in {ChunkCount} chunk(s) ({InputTokens}in/{OutputTokens}out)",
+                request.TraceId, fileRef.FileName, extractionResult.ItemCount, chunks.Count,
                 extractionResult.InputTokens, extractionResult.OutputTokens);
         }
 

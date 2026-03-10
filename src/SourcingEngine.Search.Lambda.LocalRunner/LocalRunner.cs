@@ -192,6 +192,21 @@ public static class LocalRunner
             Environment.GetEnvironmentVariable("Bedrock__Enabled") ?? "true");
         Environment.SetEnvironmentVariable("Bedrock__Region",
             Environment.GetEnvironmentVariable("Bedrock__Region") ?? "us-east-2");
+
+        // Agent settings — enable agent search strategy with Supabase MCP
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("Agent__SupabaseMcpAuthToken")))
+        {
+            Environment.SetEnvironmentVariable("Agent__Enabled", "true");
+            Environment.SetEnvironmentVariable("Agent__ModelId", "us.anthropic.claude-sonnet-4-20250514-v1:0");
+            Environment.SetEnvironmentVariable("Agent__Region", "us-east-2");
+            Environment.SetEnvironmentVariable("Agent__SupabaseMcpUrl",
+                "https://mcp.supabase.com/mcp?project_ref=dtxsieykjcvspzbsrrln");
+            Environment.SetEnvironmentVariable("Agent__SupabaseMcpAuthToken",
+                "sbp_6ab4d9247cba3003be8b819a92b4a5e0662b25da");
+            Environment.SetEnvironmentVariable("Agent__MaxToolCalls", "15");
+            Environment.SetEnvironmentVariable("Agent__MaxTokens", "16384");
+            Environment.SetEnvironmentVariable("Agent__MaxResults", "15");
+        }
     }
 }
 

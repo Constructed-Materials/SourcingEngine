@@ -248,6 +248,10 @@ public class BomExtractionLambdaStack : Stack
             ?? "bom-extraction-result-queue";
         var sourcingDbSecretArn = (string)this.Node.TryGetContext("sourcingDbSecretArn")
             ?? "";
+        var supabaseMcpUrl = (string)this.Node.TryGetContext("supabaseMcpUrl")
+            ?? "https://mcp.supabase.com/mcp?project_ref=dtxsieykjcvspzbsrrln";
+        var supabaseMcpAuthToken = (string)this.Node.TryGetContext("supabaseMcpAuthToken")
+            ?? "";
 
         // ECR Repository — created by deploy script, imported here
         var sourcingEcrRepo = Repository.FromRepositoryName(this, "SourcingEngineLambdaRepo", "sourcing-engine-lambda");
@@ -269,7 +273,7 @@ public class BomExtractionLambdaStack : Stack
                 ManagedPolicy.FromAwsManagedPolicyName("service-role/AWSLambdaVPCAccessExecutionRole"));
         }
 
-        // Bedrock — embedding + parsing models
+        // Bedrock — embedding + parsing models + agent reasoning model (Claude Sonnet 4)
         sourcingLambdaRole.AddToPolicy(new PolicyStatement(new PolicyStatementProps
         {
             Sid = "BedrockInvokeSourcing",
@@ -277,9 +281,14 @@ public class BomExtractionLambdaStack : Stack
             Actions = new[] { "bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream" },
             Resources = new[]
             {
+                // Embedding model
                 "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+                // Parsing model
                 "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
                 $"arn:aws:bedrock:us-east-2:{Aws.ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
+                // Agent reasoning model (Claude Sonnet 4 via cross-region inference)
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
+                $"arn:aws:bedrock:us-east-2:{Aws.ACCOUNT_ID}:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0",
             },
         }));
 
@@ -314,29 +323,33 @@ public class BomExtractionLambdaStack : Stack
             Resources = new[] { "*" },
         }));
 
-        // Lambda Function
+        // Lambda Function — agent strategy uses Claude Sonnet 4 via Bedrock Converse API
+        // and calls Supabase MCP for database queries. Each BOM item takes ~90-150s,
+        // so timeout is set to 600s to handle multi-item requests with retry headroom.
         var sourcingFunction = new DockerImageFunction(this, "SourcingEngineLambda", new DockerImageFunctionProps
         {
             FunctionName = "sourcing-engine-dotnet",
-            Description = "Searches product catalog for BOM items, triggered by extraction results queue",
+            Description = "Searches product catalog for BOM items using AI agent strategy, triggered by extraction results queue",
             Code = DockerImageCode.FromEcr(sourcingEcrRepo, new EcrImageCodeProps
             {
                 TagOrDigest = "latest",
             }),
             MemorySize = 1024,
-            Timeout = Duration.Seconds(300),
+            Timeout = Duration.Seconds(900),
             Role = sourcingLambdaRole,
             Vpc = vpc,
             VpcSubnets = useVpc ? new SubnetSelection { SubnetType = SubnetType.PRIVATE_WITH_EGRESS } : null,
             SecurityGroups = lambdaSg != null ? new[] { lambdaSg } : null,
             Environment = new Dictionary<string, string>
             {
+                // Semantic search (used as fallback when Agent is disabled)
                 ["SemanticSearch__Enabled"] = "true",
-                ["SemanticSearch__MatchCount"] = "5",
+                ["SemanticSearch__MatchCount"] = "15",
                 ["SemanticSearch__SimilarityThreshold"] = "0.4",
                 ["SemanticSearch__EnableSpecReRanking"] = "true",
                 ["SemanticSearch__ReRankerSemanticWeight"] = "0.6",
                 ["SemanticSearch__ReRankerSpecWeight"] = "0.4",
+                // Bedrock — embedding + parsing (required for both strategies)
                 ["Bedrock__Enabled"] = "true",
                 ["Bedrock__Region"] = "us-east-2",
                 ["Bedrock__EmbeddingModelId"] = "amazon.titan-embed-text-v2:0",
@@ -347,6 +360,19 @@ public class BomExtractionLambdaStack : Stack
                 ["Bedrock__ParsingTemperature"] = "0.1",
                 ["Bedrock__TimeoutSeconds"] = "30",
                 ["Bedrock__MaxConcurrentEmbeddings"] = "5",
+                // Agent strategy — Claude Sonnet 4 reasoning + Supabase MCP for DB access
+                ["Agent__Enabled"] = "true",
+                ["Agent__ModelId"] = "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                ["Agent__Region"] = "us-east-2",
+                ["Agent__SupabaseMcpUrl"] = supabaseMcpUrl,
+                ["Agent__SupabaseMcpAuthToken"] = supabaseMcpAuthToken,
+                ["Agent__MaxToolCalls"] = "15",
+                ["Agent__Temperature"] = "0.1",
+                ["Agent__MaxTokens"] = "16384",
+                ["Agent__MaxResults"] = "15",
+                ["Agent__MaxConcurrentSearches"] = "1",
+                ["Agent__PerItemTimeoutSeconds"] = "180",
+                // Lambda — broker + database + routing
                 ["Lambda__BrokerHost"] = brokerHost,
                 ["Lambda__BrokerPort"] = "5671",
                 ["Lambda__BrokerSecretArn"] = secretArn,

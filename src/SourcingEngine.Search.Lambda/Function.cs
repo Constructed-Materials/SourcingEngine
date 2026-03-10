@@ -206,6 +206,7 @@ public class Function
                     TechnicalSpecs = m.TechnicalSpecs,
                     SemanticScore = m.SemanticScore,
                     FinalScore = m.FinalScore,
+                    Reasoning = m.Reasoning,
                 }).ToList(),
             }).ToList(),
         };

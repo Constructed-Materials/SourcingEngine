@@ -44,6 +44,16 @@ public class AgentSearchStrategy : ISearchStrategy
         _systemPrompt = LoadSystemPrompt();
     }
 
+    private const int MaxRetries = 3;
+    private static readonly int[] RetryDelaysMs = [5_000, 15_000, 30_000];
+
+    /// <summary>
+    /// Tracks when the last throttling event occurred so we can pace
+    /// sequential items and let the Bedrock TPM bucket recover.
+    /// </summary>
+    private DateTime _lastThrottleTime = DateTime.MinValue;
+    private const int PostThrottleCooldownMs = 10_000;
+
     public async Task<SearchStrategyResult> ExecuteAsync(
         BomLineItem item, CancellationToken cancellationToken)
     {
@@ -51,33 +61,82 @@ public class AgentSearchStrategy : ISearchStrategy
             "AgentSearchStrategy: Searching for BOM item '{BomItem}' - '{Description}'",
             item.BomItem, item.Description);
 
-        try
+        // If we recently hit throttling, wait before starting this item
+        var sinceLast = DateTime.UtcNow - _lastThrottleTime;
+        if (sinceLast.TotalMilliseconds < PostThrottleCooldownMs)
         {
-            // Build the agent
-            var kernel = CreateKernel();
-            var agent = CreateAgent(kernel);
-
-            // Build user message from BOM item
-            var userMessage = BuildUserMessage(item);
-            _logger.LogDebug("Agent user message: {Message}", userMessage);
-
-            // Run the agent and collect the final response
-            var responseText = await InvokeAgentAsync(agent, userMessage, cancellationToken);
-
-            // Parse the agent's structured response
-            return ParseAgentResponse(responseText, item);
+            var cooldown = PostThrottleCooldownMs - (int)sinceLast.TotalMilliseconds;
+            _logger.LogInformation(
+                "Cooling down {CooldownMs}ms before searching '{BomItem}' (recent throttling)",
+                cooldown, item.BomItem);
+            await Task.Delay(cooldown, cancellationToken);
         }
-        catch (Exception ex)
+
+        for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {
-            _logger.LogError(ex, "Agent search failed for BOM item '{BomItem}'", item.BomItem);
-            return new SearchStrategyResult
+            try
             {
-                Matches = [],
-                Warnings = [$"Agent search failed: {ex.Message}"],
-                FamilyLabel = null,
-                CsiCode = null
-            };
+                // Build the agent fresh on each attempt (clean chat history)
+                var kernel = CreateKernel();
+                var agent = CreateAgent(kernel);
+
+                // Build user message from BOM item
+                var userMessage = BuildUserMessage(item);
+                if (attempt == 0)
+                    _logger.LogDebug("Agent user message: {Message}", userMessage);
+
+                // Run the agent and collect the final response
+                var responseText = await InvokeAgentAsync(agent, userMessage, cancellationToken);
+
+                // Parse the agent's structured response
+                return ParseAgentResponse(responseText, item);
+            }
+            catch (Exception ex) when (IsThrottlingException(ex) && attempt < MaxRetries)
+            {
+                _lastThrottleTime = DateTime.UtcNow;
+                var delay = RetryDelaysMs[attempt];
+                _logger.LogWarning(
+                    "Bedrock throttling on attempt {Attempt}/{Max} for '{BomItem}', retrying in {Delay}ms",
+                    attempt + 1, MaxRetries, item.BomItem, delay);
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                if (IsThrottlingException(ex))
+                    _lastThrottleTime = DateTime.UtcNow;
+
+                _logger.LogError(ex, "Agent search failed for BOM item '{BomItem}'", item.BomItem);
+                return new SearchStrategyResult
+                {
+                    Matches = [],
+                    Warnings = [$"Agent search failed: {ex.Message}"],
+                    FamilyLabel = null,
+                    CsiCode = null
+                };
+            }
         }
+
+        // Should not reach here, but safety fallback
+        return new SearchStrategyResult
+        {
+            Matches = [],
+            Warnings = ["Agent search exhausted all retry attempts due to throttling"],
+            FamilyLabel = null,
+            CsiCode = null
+        };
+    }
+
+    private static bool IsThrottlingException(Exception ex)
+    {
+        // Check the exception chain for Bedrock ThrottlingException
+        for (var current = ex; current != null; current = current.InnerException)
+        {
+            if (current.GetType().Name == "ThrottlingException" ||
+                current.Message.Contains("throttl", StringComparison.OrdinalIgnoreCase) ||
+                current.Message.Contains("Too many tokens", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private Kernel CreateKernel()
@@ -135,7 +194,7 @@ public class AgentSearchStrategy : ISearchStrategy
     private static string BuildUserMessage(BomLineItem item)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Find matching products for this BOM line item:");
+        sb.AppendLine("Search the database for ALL products matching this BOM line item. Maximize recall — find every possible match across all related material families.");
         sb.AppendLine();
         sb.AppendLine($"**Item:** {item.BomItem}");
         sb.AppendLine($"**Description:** {item.Description}");
@@ -174,6 +233,9 @@ public class AgentSearchStrategy : ISearchStrategy
                     sb.AppendLine($"  - {kvp.Key}: {kvp.Value}");
             }
         }
+
+        sb.AppendLine();
+        sb.AppendLine("Follow the 6-phase search strategy. Always query product_attribute_values for matched products. Report all requirement gaps.");
 
         return sb.ToString();
     }
@@ -222,8 +284,13 @@ public class AgentSearchStrategy : ISearchStrategy
 
     private SearchStrategyResult ParseAgentResponse(string responseText, BomLineItem item)
     {
-        // The agent should return pure JSON, but might wrap in markdown fences
+        // The agent should return pure JSON, but might wrap in markdown fences.
+        // ExtractJson also handles truncated responses from token-limit cutoffs.
         var json = ExtractJson(responseText);
+
+        if (json != responseText.Trim())
+            _logger.LogDebug("Agent response required JSON extraction/repair (original {OrigLen} chars → {JsonLen} chars)",
+                responseText.Length, json.Length);
 
         try
         {
@@ -359,6 +426,8 @@ public class AgentSearchStrategy : ISearchStrategy
 
     /// <summary>
     /// Extract JSON from the agent's response, stripping markdown code fences if present.
+    /// If the JSON is truncated (due to token limits), attempts to repair it by closing
+    /// open brackets/braces so that already-complete matches can still be parsed.
     /// </summary>
     private static string ExtractJson(string text)
     {
@@ -372,24 +441,118 @@ public class AgentSearchStrategy : ISearchStrategy
         {
             var end = trimmed.LastIndexOf("```", StringComparison.Ordinal);
             if (end > 7)
-                return trimmed[7..end].Trim();
+                trimmed = trimmed[7..end].Trim();
+            else
+                trimmed = trimmed[7..].Trim(); // No closing fence — truncated
         }
-
-        if (trimmed.StartsWith("```"))
+        else if (trimmed.StartsWith("```"))
         {
             var firstNewline = trimmed.IndexOf('\n');
             var end = trimmed.LastIndexOf("```", StringComparison.Ordinal);
             if (firstNewline > 0 && end > firstNewline)
-                return trimmed[(firstNewline + 1)..end].Trim();
+                trimmed = trimmed[(firstNewline + 1)..end].Trim();
+            else if (firstNewline > 0)
+                trimmed = trimmed[(firstNewline + 1)..].Trim();
         }
 
-        // Find first { and last } for bare JSON
+        // Find first { for bare JSON
         var firstBrace = trimmed.IndexOf('{');
         var lastBrace = trimmed.LastIndexOf('}');
         if (firstBrace >= 0 && lastBrace > firstBrace)
-            return trimmed[firstBrace..(lastBrace + 1)];
+            trimmed = trimmed[firstBrace..(lastBrace + 1)];
+        else if (firstBrace >= 0)
+            trimmed = trimmed[firstBrace..]; // No closing brace — truncated
 
-        return trimmed;
+        // Try parsing as-is first; only attempt repair if it fails
+        try
+        {
+            using var _ = JsonDocument.Parse(trimmed);
+            return trimmed;
+        }
+        catch (JsonException)
+        {
+            // Fall through to repair
+        }
+
+        return RepairTruncatedJson(trimmed);
+    }
+
+    /// <summary>
+    /// Attempt to repair truncated JSON by removing the last incomplete element
+    /// and closing any open arrays/objects. This salvages already-complete matches
+    /// when the LLM's response is cut off by the token limit.
+    /// </summary>
+    private static string RepairTruncatedJson(string json)
+    {
+        // Strategy: find the last complete object boundary in the matches array,
+        // truncate there, then close any remaining open brackets/braces.
+
+        // Find the last position where a complete JSON object ended ("},")
+        // or where an array element ended cleanly
+        var lastCompleteObject = -1;
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+
+        for (int i = 0; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\' && inString) { escaped = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+
+            switch (c)
+            {
+                case '{': case '[': depth++; break;
+                case '}':
+                    depth--;
+                    if (depth >= 1) // Completed an inner object while still inside the root
+                        lastCompleteObject = i;
+                    break;
+                case ']':
+                    depth--;
+                    if (depth >= 1)
+                        lastCompleteObject = i;
+                    break;
+            }
+        }
+
+        if (lastCompleteObject <= 0)
+            return json; // Can't salvage
+
+        // Truncate after the last complete inner object
+        var repaired = json[..(lastCompleteObject + 1)];
+
+        // Re-scan to determine what closers are needed
+        inString = false;
+        escaped = false;
+        var openStack = new Stack<char>();
+
+        for (int i = 0; i < repaired.Length; i++)
+        {
+            char c = repaired[i];
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\' && inString) { escaped = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+
+            switch (c)
+            {
+                case '{': openStack.Push('}'); break;
+                case '[': openStack.Push(']'); break;
+                case '}': case ']':
+                    if (openStack.Count > 0) openStack.Pop();
+                    break;
+            }
+        }
+
+        // Close all remaining open brackets/braces
+        var sb = new StringBuilder(repaired);
+        while (openStack.Count > 0)
+            sb.Append(openStack.Pop());
+
+        return sb.ToString();
     }
 
     private static string LoadSystemPrompt()

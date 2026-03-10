@@ -36,24 +36,21 @@ public class SupabaseMcpPlugin
 
     /// <summary>
     /// Execute a read-only SQL query against the SourcingEngine Supabase PostgreSQL database.
-    /// Use this to search for products, materials, vendors, and product knowledge.
-    /// 
-    /// Available tables (all in public schema):
-    /// - products: product_id (uuid PK), vendor_id (int FK), family_label (varchar), model_name (varchar), csi_section_code (varchar), is_active (bool), base_price (numeric)
-    /// - product_knowledge: product_id (uuid FK), model (varchar), vendor_key (varchar), description (text), use_cases (text[]), specifications (jsonb), ideal_applications (text[]), not_recommended_for (text[])
-    /// - vendors: vendor_id (int PK), name (varchar), vendor_type (varchar), is_manufacturer (bool), certifications (text[]), description (text)
-    /// - cm_master_materials: family_label (varchar PK), family_name (varchar), csi_division (varchar), synonyms (text), fts (tsvector)
-    /// - product_certifications: product_id (uuid FK), cert_id (uuid FK), verification_status (varchar)
-    /// - certifications: cert_id (uuid PK), code (varchar), title (text), issuer (varchar)
-    /// - product_attribute_values: pav_id (uuid PK), product_id (uuid FK), attribute_key (varchar), value_text (text), value_num (numeric), value_unit (varchar)
-    /// 
-    /// IMPORTANT: Only use SELECT queries. Never INSERT, UPDATE, DELETE, or DROP.
-    /// IMPORTANT: Always filter by is_active = true on the products table.
     /// </summary>
-    /// <param name="query">A read-only SQL SELECT query to execute against the database.</param>
-    /// <returns>JSON array of result rows, or an error message.</returns>
     [KernelFunction("execute_sql")]
-    [Description("Execute a read-only SQL query against the SourcingEngine PostgreSQL database to search for products, materials, vendors, and knowledge.")]
+    [Description(
+        "Execute a read-only SQL SELECT query against the SourcingEngine PostgreSQL database. " +
+        "Tables: products (product_id uuid PK, vendor_id int FK, family_label varchar FK, model_name varchar, csi_section_code varchar, is_active bool — ALWAYS filter true, base_price numeric), " +
+        "product_knowledge (product_id uuid FK 1:1, description text, use_cases text[], specifications jsonb — keys vary by family NEVER guess, ideal_applications text[], not_recommended_for text[], environmental_data jsonb), " +
+        "product_attribute_values (product_id uuid FK 1:N, attribute_key varchar, value_text text, value_num numeric, value_unit varchar — top keys: thickness_options_mm, thickness_min_mm, thickness_max_mm, flexural_strength_mpa, water_absorption_pct, mohs_hardness, fire_rating, color, origin_country, material_type, density_pcf, weight_psf), " +
+        "vendors (vendor_id int PK, name varchar, vendor_type varchar, certifications text[] — vendor-level certs apply to all products, factory_locations text[], na_shipping_status varchar), " +
+        "cm_master_materials (family_label varchar PK, family_name varchar, csi_division varchar, synonyms text, fts tsvector — use plainto_tsquery for FTS), " +
+        "product_certifications (product_id uuid FK, cert_id uuid FK, verification_status varchar), " +
+        "certifications (cert_id uuid PK, code varchar, title text, issuer varchar). " +
+        "RULES: Only SELECT/WITH queries. Always filter products.is_active = true. Use product_attribute_values for color, thickness, fire_rating, origin filtering. " +
+        "Specs JSONB keys vary by family — inspect results before filtering. " +
+        "Stone tiles use flat keys (stone_type, finishes, color_family, quarry_origin). Porcelain uses nested keys (technical, dimensions, performance). " +
+        "CMU uses nominal_size, width_inches or width_mm_options. Windows use nafs_rating, u_factor, shgc, design_pressure_psf.")]
     public async Task<string> ExecuteSqlAsync(
         [Description("A read-only SQL SELECT query. Only SELECT is allowed. Always filter products by is_active = true.")] 
         string query)

@@ -7,6 +7,8 @@
     "vpcId": "",
     "queueName": "bom-extraction-queue",
     "sourcingQueueName": "bom-extraction-result-queue",
-    "sourcingDbSecretArn": "arn:aws:secretsmanager:us-east-2:866934058848:secret:SourcingEngine/database-connection-8w2u2i"
+    "sourcingDbSecretArn": "arn:aws:secretsmanager:us-east-2:866934058848:secret:SourcingEngine/database-connection-8w2u2i",
+    "supabaseMcpUrl": "https://mcp.supabase.com/mcp?project_ref=dtxsieykjcvspzbsrrln",
+    "supabaseMcpAuthToken": "sbp_6ab4d9247cba3003be8b819a92b4a5e0662b25da"
   }
 }

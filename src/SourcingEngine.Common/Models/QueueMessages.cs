@@ -169,6 +169,9 @@ public class ProductMatchDto
 
     [JsonPropertyName("finalScore")]
     public float? FinalScore { get; set; }
+
+    [JsonPropertyName("reasoning")]
+    public string? Reasoning { get; set; }
 }
 
 /// <summary>

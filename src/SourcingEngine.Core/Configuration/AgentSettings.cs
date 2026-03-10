@@ -20,11 +20,11 @@ public class AgentSettings
     /// Bedrock model ID for the agent's reasoning (the "brain").
     /// Supports any model available via Bedrock Converse API.
     /// Examples:
-    ///   - us.amazon.nova-pro-v1:0 (best reasoning, supports tool use)
+    ///   - us.anthropic.claude-sonnet-4-20250514-v1:0 (best reasoning + tool use, recommended)
+    ///   - us.amazon.nova-pro-v1:0 (Amazon alternative, weaker at nuanced SQL)
     ///   - us.amazon.nova-lite-v1:0 (cheapest)
-    ///   - anthropic.claude-sonnet-4-20250514-v1:0 (Anthropic alternative)
     /// </summary>
-    public string ModelId { get; set; } = "us.amazon.nova-pro-v1:0";
+    public string ModelId { get; set; } = "us.anthropic.claude-sonnet-4-20250514-v1:0";
 
     /// <summary>
     /// AWS region for the agent's Bedrock model.
@@ -45,9 +45,10 @@ public class AgentSettings
 
     /// <summary>
     /// Maximum number of tool calls the agent can make per BOM item search.
+    /// The 6-phase search strategy typically uses 3-5 queries, plus error recovery.
     /// Safety guard against runaway reasoning loops.
     /// </summary>
-    public int MaxToolCalls { get; set; } = 10;
+    public int MaxToolCalls { get; set; } = 15;
 
     /// <summary>
     /// Temperature for the agent's LLM reasoning (0.0-1.0).
@@ -57,11 +58,25 @@ public class AgentSettings
 
     /// <summary>
     /// Maximum tokens for the agent's response.
+    /// Must accommodate up to MaxResults matches with full reasoning, specs, and attributes.
     /// </summary>
-    public int MaxTokens { get; set; } = 4096;
+    public int MaxTokens { get; set; } = 16384;
 
     /// <summary>
     /// Maximum number of product matches the agent should return per BOM item.
     /// </summary>
-    public int MaxResults { get; set; } = 10;
+    public int MaxResults { get; set; } = 15;
+
+    /// <summary>
+    /// Maximum number of BOM items to search concurrently.
+    /// Higher values reduce total latency but increase Bedrock throttling risk.
+    /// Set to 1 for sequential processing.
+    /// </summary>
+    public int MaxConcurrentSearches { get; set; } = 1;
+
+    /// <summary>
+    /// Per-item timeout in seconds for a single agent search.
+    /// Prevents one stuck item from consuming the entire Lambda budget.
+    /// </summary>
+    public int PerItemTimeoutSeconds { get; set; } = 180;
 }

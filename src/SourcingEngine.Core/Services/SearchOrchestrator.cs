@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SourcingEngine.Common.Models;
+using SourcingEngine.Core.Configuration;
 using SourcingEngine.Core.Models;
 
 namespace SourcingEngine.Core.Services;
@@ -14,6 +16,8 @@ public class SearchOrchestrator : ISearchOrchestrator
 {
     private readonly ISearchStrategy _strategy;
     private readonly ILogger<SearchOrchestrator> _logger;
+    private readonly int _maxConcurrentSearches;
+    private readonly int _perItemTimeoutSeconds;
 
     /// <summary>
     /// Maximum allowed length for single-item search input text.
@@ -22,10 +26,13 @@ public class SearchOrchestrator : ISearchOrchestrator
 
     public SearchOrchestrator(
         ISearchStrategy strategy,
-        ILogger<SearchOrchestrator> logger)
+        ILogger<SearchOrchestrator> logger,
+        IOptions<AgentSettings>? agentSettings = null)
     {
         _strategy = strategy;
         _logger = logger;
+        _maxConcurrentSearches = agentSettings?.Value.MaxConcurrentSearches ?? 1;
+        _perItemTimeoutSeconds = agentSettings?.Value.PerItemTimeoutSeconds ?? 180;
     }
 
     /// <inheritdoc />
@@ -58,13 +65,27 @@ public class SearchOrchestrator : ISearchOrchestrator
             warnings.Add($"Removed {dupeCount} duplicate BOM item(s)");
         }
 
-        foreach (var item in uniqueItems)
+        // Process BOM items concurrently (bounded by MaxConcurrentSearches)
+        // to reduce total latency in Lambda. Each agent search takes ~90-150s,
+        // so parallel execution is critical for multi-item messages.
+        var warningsLock = new object();
+        var semaphore = new SemaphoreSlim(_maxConcurrentSearches);
+        var tasks = uniqueItems.Select(async item =>
         {
+            await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var searchResult = await SearchItemAsync(item, cancellationToken);
+                // Per-item timeout prevents one stuck search from consuming the full Lambda budget
+                using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                itemCts.CancelAfter(TimeSpan.FromSeconds(_perItemTimeoutSeconds));
 
-                itemResults.Add(new BomItemSearchResult
+                var searchResult = await SearchItemAsync(item, itemCts.Token);
+
+                _logger.LogInformation(
+                    "BOM item '{BomItem}' → {MatchCount} matches",
+                    item.BomItem, searchResult.MatchCount);
+
+                return new BomItemSearchResult
                 {
                     BomItemName = item.BomItem,
                     Description = item.Description,
@@ -72,19 +93,35 @@ public class SearchOrchestrator : ISearchOrchestrator
                     Certifications = item.Certifications,
                     Notes = item.Notes,
                     SearchResult = searchResult
-                });
+                };
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "Search timed out after {Timeout}s for BOM item '{BomItem}'",
+                    _perItemTimeoutSeconds, item.BomItem);
+                lock (warningsLock) { warnings.Add($"Search timed out for '{item.BomItem}' after {_perItemTimeoutSeconds}s"); }
 
-                _logger.LogInformation(
-                    "BOM item '{BomItem}' → {MatchCount} matches",
-                    item.BomItem, searchResult.MatchCount);
+                return new BomItemSearchResult
+                {
+                    BomItemName = item.BomItem,
+                    Description = item.Description,
+                    Quantity = item.Quantity,
+                    Certifications = item.Certifications,
+                    Notes = item.Notes,
+                    SearchResult = new SearchResult
+                    {
+                        Query = item.Description,
+                        Warnings = [$"Search timed out after {_perItemTimeoutSeconds}s"]
+                    }
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Search failed for BOM item '{BomItem}'", item.BomItem);
-                warnings.Add($"Search failed for '{item.BomItem}': {ex.Message}");
+                lock (warningsLock) { warnings.Add($"Search failed for '{item.BomItem}': {ex.Message}"); }
 
-                // Add empty result so the item isn't silently dropped
-                itemResults.Add(new BomItemSearchResult
+                return new BomItemSearchResult
                 {
                     BomItemName = item.BomItem,
                     Description = item.Description,
@@ -96,9 +133,15 @@ public class SearchOrchestrator : ISearchOrchestrator
                         Query = item.Description,
                         Warnings = [$"Search failed: {ex.Message}"]
                     }
-                });
+                };
             }
-        }
+            finally
+            {
+                semaphore.Release();
+            }
+        }).ToList();
+
+        itemResults.AddRange(await Task.WhenAll(tasks));
 
         stopwatch.Stop();
 
