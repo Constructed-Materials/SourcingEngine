@@ -159,9 +159,9 @@ public class Function
 
     /// <summary>
     /// Maximum number of BOM items per result message.
-    /// Keeps downstream Lambda invocations within Bedrock TPM limits and timeout budget.
+    /// Each agent search takes up to 240s, so 3 items × 240s = 720s fits in the 900s Lambda timeout.
     /// </summary>
-    private const int ChunkSize = 5;
+    private const int ChunkSize = 3;
 
     private async Task ProcessRequestFilesAsync(
         ExtractionRequestMessage request,

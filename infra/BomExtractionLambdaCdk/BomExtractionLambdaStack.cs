@@ -273,7 +273,7 @@ public class BomExtractionLambdaStack : Stack
                 ManagedPolicy.FromAwsManagedPolicyName("service-role/AWSLambdaVPCAccessExecutionRole"));
         }
 
-        // Bedrock — embedding + parsing models + agent reasoning model (Claude Sonnet 4)
+        // Bedrock — embedding + parsing models
         sourcingLambdaRole.AddToPolicy(new PolicyStatement(new PolicyStatementProps
         {
             Sid = "BedrockInvokeSourcing",
@@ -286,9 +286,25 @@ public class BomExtractionLambdaStack : Stack
                 // Parsing model
                 "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
                 $"arn:aws:bedrock:us-east-2:{Aws.ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
-                // Agent reasoning model (Claude Sonnet 4 via cross-region inference)
-                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
-                $"arn:aws:bedrock:us-east-2:{Aws.ACCOUNT_ID}:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0",
+            },
+        }));
+
+        // Bedrock — Agent reasoning model (Claude Sonnet 4.6 via GLOBAL cross-region inference)
+        // Global inference routes to ALL commercial AWS regions for highest TPM and auto-scaling.
+        // Requires 3-part IAM: regional inference profile + regional FM + global FM (no region/account).
+        sourcingLambdaRole.AddToPolicy(new PolicyStatement(new PolicyStatementProps
+        {
+            Sid = "BedrockGlobalInferenceProfile",
+            Effect = Effect.ALLOW,
+            Actions = new[] { "bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream" },
+            Resources = new[]
+            {
+                // 1. Regional inference profile (source region)
+                $"arn:aws:bedrock:us-east-2:{Aws.ACCOUNT_ID}:inference-profile/global.anthropic.claude-sonnet-4-6",
+                // 2. Regional foundation model (source region)
+                "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-6",
+                // 3. Global foundation model (no region, no account — enables cross-region routing)
+                "arn:aws:bedrock:::foundation-model/anthropic.claude-sonnet-4-6",
             },
         }));
 
@@ -323,9 +339,10 @@ public class BomExtractionLambdaStack : Stack
             Resources = new[] { "*" },
         }));
 
-        // Lambda Function — agent strategy uses Claude Sonnet 4 via Bedrock Converse API
-        // and calls Supabase MCP for database queries. Each BOM item takes ~90-150s,
-        // so timeout is set to 600s to handle multi-item requests with retry headroom.
+        // Lambda Function — agent strategy uses Claude Sonnet 4.6 via Bedrock Converse API
+        // with GLOBAL cross-region inference for highest throughput. Each BOM item takes ~90-150s.
+        // ReservedConcurrentExecutions limits concurrent instances to prevent Bedrock TPM exhaustion
+        // when multiple chunks are queued simultaneously.
         var sourcingFunction = new DockerImageFunction(this, "SourcingEngineLambda", new DockerImageFunctionProps
         {
             FunctionName = "sourcing-engine-dotnet",
@@ -336,6 +353,7 @@ public class BomExtractionLambdaStack : Stack
             }),
             MemorySize = 1024,
             Timeout = Duration.Seconds(900),
+            ReservedConcurrentExecutions = 2,
             Role = sourcingLambdaRole,
             Vpc = vpc,
             VpcSubnets = useVpc ? new SubnetSelection { SubnetType = SubnetType.PRIVATE_WITH_EGRESS } : null,
@@ -360,18 +378,18 @@ public class BomExtractionLambdaStack : Stack
                 ["Bedrock__ParsingTemperature"] = "0.1",
                 ["Bedrock__TimeoutSeconds"] = "30",
                 ["Bedrock__MaxConcurrentEmbeddings"] = "5",
-                // Agent strategy — Claude Sonnet 4 reasoning + Supabase MCP for DB access
+                // Agent strategy — Claude Sonnet 4.6 via GLOBAL cross-region inference + Supabase MCP
                 ["Agent__Enabled"] = "true",
-                ["Agent__ModelId"] = "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                ["Agent__ModelId"] = "global.anthropic.claude-sonnet-4-6",
                 ["Agent__Region"] = "us-east-2",
                 ["Agent__SupabaseMcpUrl"] = supabaseMcpUrl,
                 ["Agent__SupabaseMcpAuthToken"] = supabaseMcpAuthToken,
                 ["Agent__MaxToolCalls"] = "15",
                 ["Agent__Temperature"] = "0.1",
-                ["Agent__MaxTokens"] = "16384",
+                ["Agent__MaxTokens"] = "8192",
                 ["Agent__MaxResults"] = "15",
                 ["Agent__MaxConcurrentSearches"] = "1",
-                ["Agent__PerItemTimeoutSeconds"] = "180",
+                ["Agent__PerItemTimeoutSeconds"] = "240",
                 // Lambda — broker + database + routing
                 ["Lambda__BrokerHost"] = brokerHost,
                 ["Lambda__BrokerPort"] = "5671",

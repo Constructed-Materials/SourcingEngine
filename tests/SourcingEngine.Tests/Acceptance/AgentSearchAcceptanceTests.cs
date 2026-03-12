@@ -60,6 +60,29 @@ public class AgentSearchAcceptanceTests
             $"Expected ≥1 matches for masonry block, got {result.MatchCount}");
     }
 
+     /// <summary>
+    /// Agent search for 8" Masonry Block — the canonical test case.
+    /// Expected: agent finds cmu_blocks family and returns ≥1 product matches.
+    /// </summary>
+    [Fact]
+    public async Task AgentSearch_FiberCement_ReturnsMatches()
+    {
+        using var scope = _fixture.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ISearchOrchestrator>();
+
+        var result = await orchestrator.SearchAsync("fiber cement for exterior 1/2 inch");
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            result,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+        _output.WriteLine("Serialized SearchResult JSON:");
+        _output.WriteLine(json);
+        OutputResult(result);
+
+        Assert.True(result.MatchCount >= 1,
+            $"Expected ≥1 matches for masonry block, got {result.MatchCount}");
+    }
+
     /// <summary>
     /// Agent search for a BOM line item with full metadata.
     /// </summary>

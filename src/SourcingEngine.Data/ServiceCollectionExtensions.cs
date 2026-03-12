@@ -56,7 +56,10 @@ public static class ServiceCollectionExtensions
         if (agentSettings?.Enabled == true)
         {
             services.Configure<AgentSettings>(configuration.GetSection(AgentSettings.SectionName));
-            services.AddHttpClient("SupabaseMcp");
+            services.AddHttpClient("SupabaseMcp", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
             services.AddScoped<ISearchStrategy, AgentSearchStrategy>();
         }
         else

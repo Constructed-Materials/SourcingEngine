@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -57,6 +58,8 @@ public class AgentSearchStrategy : ISearchStrategy
     public async Task<SearchStrategyResult> ExecuteAsync(
         BomLineItem item, CancellationToken cancellationToken)
     {
+        var sw = Stopwatch.StartNew();
+
         _logger.LogInformation(
             "AgentSearchStrategy: Searching for BOM item '{BomItem}' - '{Description}'",
             item.BomItem, item.Description);
@@ -91,13 +94,22 @@ public class AgentSearchStrategy : ISearchStrategy
                 // Parse the agent's structured response
                 return ParseAgentResponse(responseText, item);
             }
+            catch (OperationCanceledException)
+            {
+                // Re-throw cancellation so the orchestrator's per-item timeout handler
+                // can report it properly. Don't swallow it as a generic error.
+                _logger.LogWarning(
+                    "Agent search cancelled for '{BomItem}' after {ElapsedMs}ms (attempt {Attempt})",
+                    item.BomItem, sw.ElapsedMilliseconds, attempt + 1);
+                throw;
+            }
             catch (Exception ex) when (IsThrottlingException(ex) && attempt < MaxRetries)
             {
                 _lastThrottleTime = DateTime.UtcNow;
                 var delay = RetryDelaysMs[attempt];
                 _logger.LogWarning(
-                    "Bedrock throttling on attempt {Attempt}/{Max} for '{BomItem}', retrying in {Delay}ms",
-                    attempt + 1, MaxRetries, item.BomItem, delay);
+                    "Bedrock throttling on attempt {Attempt}/{Max} for '{BomItem}' at {ElapsedMs}ms, retrying in {Delay}ms",
+                    attempt + 1, MaxRetries, item.BomItem, sw.ElapsedMilliseconds, delay);
                 await Task.Delay(delay, cancellationToken);
             }
             catch (Exception ex)
@@ -105,7 +117,9 @@ public class AgentSearchStrategy : ISearchStrategy
                 if (IsThrottlingException(ex))
                     _lastThrottleTime = DateTime.UtcNow;
 
-                _logger.LogError(ex, "Agent search failed for BOM item '{BomItem}'", item.BomItem);
+                _logger.LogError(ex,
+                    "Agent search failed for BOM item '{BomItem}' after {ElapsedMs}ms",
+                    item.BomItem, sw.ElapsedMilliseconds);
                 return new SearchStrategyResult
                 {
                     Matches = [],
@@ -146,8 +160,12 @@ public class AgentSearchStrategy : ISearchStrategy
         // Add Bedrock chat completion via Converse API
         // Use AddBedrockChatClient (IChatClient-based) instead of AddBedrockChatCompletionService
         // because the latter's internal factory doesn't route amazon.nova-* models.
-        var bedrockRuntime = new AmazonBedrockRuntimeClient(
-            RegionEndpoint.GetBySystemName(_settings.Region));
+        // Explicit timeout ensures individual Bedrock API calls don't hang indefinitely.
+        var bedrockRuntime = new AmazonBedrockRuntimeClient(new AmazonBedrockRuntimeConfig
+        {
+            RegionEndpoint = RegionEndpoint.GetBySystemName(_settings.Region),
+            Timeout = TimeSpan.FromSeconds(120),
+        });
 
 #pragma warning disable SKEXP0070
 #pragma warning disable SKEXP0001

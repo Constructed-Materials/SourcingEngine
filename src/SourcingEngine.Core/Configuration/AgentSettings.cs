@@ -18,13 +18,13 @@ public class AgentSettings
 
     /// <summary>
     /// Bedrock model ID for the agent's reasoning (the "brain").
-    /// Supports any model available via Bedrock Converse API.
+    /// Uses global cross-region inference for highest throughput and auto-routing.
     /// Examples:
-    ///   - us.anthropic.claude-sonnet-4-20250514-v1:0 (best reasoning + tool use, recommended)
+    ///   - global.anthropic.claude-sonnet-4-6 (recommended — global routing, highest TPM)
+    ///   - us.anthropic.claude-sonnet-4-20250514-v1:0 (US-only, lower TPM)
     ///   - us.amazon.nova-pro-v1:0 (Amazon alternative, weaker at nuanced SQL)
-    ///   - us.amazon.nova-lite-v1:0 (cheapest)
     /// </summary>
-    public string ModelId { get; set; } = "us.anthropic.claude-sonnet-4-20250514-v1:0";
+    public string ModelId { get; set; } = "global.anthropic.claude-sonnet-4-6";
 
     /// <summary>
     /// AWS region for the agent's Bedrock model.
@@ -58,9 +58,10 @@ public class AgentSettings
 
     /// <summary>
     /// Maximum tokens for the agent's response.
-    /// Must accommodate up to MaxResults matches with full reasoning, specs, and attributes.
+    /// Claude 3.7+ models reserve (input + max_tokens) upfront from the TPM quota,
+    /// so keep this as low as practical. 8192 covers ~15 matches with reasoning.
     /// </summary>
-    public int MaxTokens { get; set; } = 16384;
+    public int MaxTokens { get; set; } = 8192;
 
     /// <summary>
     /// Maximum number of product matches the agent should return per BOM item.
@@ -76,7 +77,9 @@ public class AgentSettings
 
     /// <summary>
     /// Per-item timeout in seconds for a single agent search.
-    /// Prevents one stuck item from consuming the entire Lambda budget.
+    /// Agent conversations involve 3-5 Bedrock calls + 3-5 MCP calls.
+    /// 240s is generous enough for the full conversation while fitting
+    /// 3 items within the 900s Lambda timeout budget (3 × 240 = 720s).
     /// </summary>
-    public int PerItemTimeoutSeconds { get; set; } = 180;
+    public int PerItemTimeoutSeconds { get; set; } = 240;
 }
